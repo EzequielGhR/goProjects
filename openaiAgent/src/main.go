@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"path"
 	"strings"
 
 	_ "github.com/marcboeker/go-duckdb"
@@ -21,12 +20,9 @@ The available columns are: %s
 The table name is: %s
 `
 
-var OPENAI_CLIENT = openai.NewClient()
+const DATA_PATH = "/home/zeke/Documents/Repos/goProjects/openaiAgent/data/Store_Sales_Price_Elasticity_Promotions_Data.parquet"
 
-var DATA_PATH = path.Join(
-	path.Dir(os.Args[0]),
-	"../data/Store_Sales_Price_Elasticity_Promotions_Data.parquet",
-)
+var OPENAI_CLIENT = openai.NewClient()
 
 func generateSqlQuery(prompt string, columns []string, tableName string) (string, error) {
 	formattedPrompt := fmt.Sprintf(
@@ -65,7 +61,7 @@ func lookupSalesData(prompt string) string {
 	_, err = db.Exec(
 		fmt.Sprintf(`
 			CREATE TABLE IF NOT EXISTS %s AS
-			SELECT * FROM read_parquet(%s)`,
+			SELECT * FROM read_parquet('%s')`,
 			tableName,
 			DATA_PATH,
 		),
@@ -97,16 +93,37 @@ func lookupSalesData(prompt string) string {
 	sqlQuery = strings.ReplaceAll(sqlQuery, "```sql", "")
 	sqlQuery = strings.Trim(sqlQuery, "`")
 
-	result, err = db.Query(sqlQuery)
+	fmt.Printf("DEBUG: %s\n", sqlQuery)
+
+	rows, err := db.Query(sqlQuery)
 	if err != nil {
 		panic(err)
 	}
 
-	// TODO: Finish UP
-	return sqlQuery
+	values := make([]interface{}, len(columns))
+	for i := range values {
+		values[i] = new(string) // Store all values as strings
+	}
+
+	resultData := []string{strings.Join(columns, ", ")}
+	for rows.Next() {
+		err = rows.Scan(values...)
+		if err != nil {
+			panic(err)
+		}
+
+		rowValues := []string{}
+		for _, value := range values {
+			rowValues = append(rowValues, *(value.(*string)))
+		}
+
+		resultData = append(resultData, strings.Join(rowValues, ", "))
+	}
+
+	return strings.Join(resultData, "\n")
 }
 
 func main() {
-	result := lookupSalesData("Provide all the information available")
+	result := lookupSalesData("Provide the first 10 rows of the table")
 	fmt.Println(result)
 }
