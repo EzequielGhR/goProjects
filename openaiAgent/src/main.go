@@ -100,27 +100,39 @@ func lookupSalesData(prompt string) string {
 		panic(err)
 	}
 
-	values := make([]interface{}, len(columns))
-	for i := range values {
-		values[i] = new(string) // Store all values as strings
+	resultData := []string{strings.Join(columns, ", ")}
+	resultData = append(resultData, extractFromRows(rows, len(columns))...)
+
+	return strings.Join(resultData, "\n")
+}
+
+func extractFromRows(rows *sql.Rows, columnsAmount int) []string {
+	resultData := []string{}
+	dynamicValues := make([]interface{}, columnsAmount)
+	for i := range dynamicValues {
+		dynamicValues[i] = new(string)
 	}
 
-	resultData := []string{strings.Join(columns, ", ")}
 	for rows.Next() {
-		err = rows.Scan(values...)
+		err := rows.Scan(dynamicValues...)
 		if err != nil {
 			panic(err)
 		}
 
 		rowValues := []string{}
-		for _, value := range values {
-			rowValues = append(rowValues, *(value.(*string)))
+		for _, value := range dynamicValues {
+			content, ok := value.(*string)
+			if ok {
+				rowValues = append(rowValues, *content)
+			} else {
+				rowValues = append(rowValues, "")
+			}
 		}
 
 		resultData = append(resultData, strings.Join(rowValues, ", "))
 	}
 
-	return strings.Join(resultData, "\n")
+	return resultData
 }
 
 func main() {
