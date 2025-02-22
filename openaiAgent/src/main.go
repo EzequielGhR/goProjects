@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 
+	_ "github.com/marcboeker/go-duckdb"
 	"github.com/openai/openai-go"
 )
 
@@ -54,6 +55,7 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 
 func lookupSalesData(prompt string) string {
 	tableName := "sales"
+
 	db, err := sql.Open("duckdb", "data.db")
 	if err != nil {
 		panic(err)
@@ -73,10 +75,38 @@ func lookupSalesData(prompt string) string {
 		panic(err)
 	}
 
-	// TODO: Finish up
-	return "success"
+	result, err := db.Query(
+		fmt.Sprintf("SELECT * FROM %s WHERE 1=2", tableName),
+	)
+
+	if err != nil {
+		panic(err)
+	}
+
+	columns, err := result.Columns()
+	if err != nil {
+		panic(err)
+	}
+
+	sqlQuery, err := generateSqlQuery(prompt, columns, tableName)
+	if err != nil {
+		panic(err)
+	}
+
+	sqlQuery = strings.Trim(sqlQuery, "\n ")
+	sqlQuery = strings.ReplaceAll(sqlQuery, "```sql", "")
+	sqlQuery = strings.Trim(sqlQuery, "`")
+
+	result, err = db.Query(sqlQuery)
+	if err != nil {
+		panic(err)
+	}
+
+	// TODO: Finish UP
+	return sqlQuery
 }
 
 func main() {
-
+	result := lookupSalesData("Provide all the information available")
+	fmt.Println(result)
 }
