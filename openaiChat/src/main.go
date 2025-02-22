@@ -89,8 +89,11 @@ func initConversation() {
 	conversationMessages = []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(content)}
 }
 
-func loadConversation() {
-	if err := loadHistoryJson(); err != nil || len(historyMessages) == 0 {
+func loadConversation(restart bool) {
+	if restart {
+		fmt.Println("Forcefully started new conversation")
+		initConversation()
+	} else if err := loadHistoryJson(); err != nil || len(historyMessages) == 0 {
 		fmt.Fprintln(os.Stderr, "Failed to load history")
 		initConversation()
 	}
@@ -173,12 +176,17 @@ func openaiChat(question string, model string) {
 }
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s [question]\n", os.Args[0])
+	if len(os.Args) < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: %s [question] [optional-restart-conversation(bool)]\n", os.Args[0])
 		os.Exit(1)
 	}
 
-	loadConversation()
+	restartConversation := false
+	if len(os.Args) > 2 {
+		restartConversation = strings.Contains(strings.ToLower(os.Args[2]), "true")
+	}
+
+	loadConversation(restartConversation)
 	openaiChat(os.Args[1], openai.ChatModelGPT4oMini)
 	saveHistoryToJson()
 }
