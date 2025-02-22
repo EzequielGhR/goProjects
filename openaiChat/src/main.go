@@ -12,11 +12,22 @@ import (
 	"github.com/openai/openai-go"
 )
 
-// <<< constants >>>
+/*
+-----------------
+<<< constants >>>
+-----------------
+*/
+
+// Path to json with message history
 const HISTORY_PATH = "./history.json"
 
-// <<< type definitions >>>
-// Simple message structure for saving history to json
+/*
+-------------------------
+ <<< type definitions >>>
+-------------------------
+*/
+
+// Simple message structure
 type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -28,16 +39,24 @@ type ConversationHistory struct {
 	Messages  []*ChatMessage `json:"messages"`
 }
 
-// <<< Define some global vars >>>
+/*
+-------------------------------
+<<< Define global vars >>>
+-------------------------------
+*/
+
 var openaiClient *openai.Client = nil
+var historyMessages = []*ChatMessage{}                                // Track history
+var conversationMessages = []openai.ChatCompletionMessageParamUnion{} // Track openai messages
 
-// Track history
-var historyMessages = []*ChatMessage{}
+/*
+---------------------
+<<< Aux functions >>>
+---------------------
+*/
 
-// track openai messages
-var conversationMessages = []openai.ChatCompletionMessageParamUnion{}
-
-// <<< Aux functions >>>
+// Save current message history to a Json at HISOTRY_PATH.
+// Returns an error which is nil on success
 func saveHistoryToJson() error {
 	history := ConversationHistory{
 		TimeStamp: time.Now().Format("2006-01-02T15:04:05"),
@@ -63,6 +82,8 @@ func saveHistoryToJson() error {
 	return nil
 }
 
+// Load message history from HISTORY_PATH
+// Returns an error which is nil on success
 func loadHistoryJson() error {
 	jsonFile, err := os.Open(HISTORY_PATH)
 	if err != nil {
@@ -82,6 +103,7 @@ func loadHistoryJson() error {
 	return nil
 }
 
+// Initialize message history and openai messages with a simple system message
 func initConversation() {
 	fmt.Println("Initializing new conversation")
 	content := "You are a useful assistant"
@@ -89,6 +111,9 @@ func initConversation() {
 	conversationMessages = []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(content)}
 }
 
+// Load the conversation if any.
+// If it fails to load or the loaded conversation doesn't have messages, initConversation is called.
+// If restart is true, initConversation is forcefully called.
 func loadConversation(restart bool) {
 	if restart {
 		fmt.Println("Forcefully started new conversation")
@@ -99,6 +124,7 @@ func loadConversation(restart bool) {
 	}
 }
 
+// Add a message to tracked openai messages based on its role
 func addConversationMessage(newMessage *ChatMessage) {
 	switch newMessage.Role {
 	case "system":
@@ -112,12 +138,19 @@ func addConversationMessage(newMessage *ChatMessage) {
 	}
 }
 
+// Update both the history messages and the openai messages tracked
 func updateHistoryAndConversation(newMessage *ChatMessage) {
 	historyMessages = append(historyMessages, newMessage)
 	addConversationMessage(newMessage)
 }
 
-// <<< main openai functions >>>
+/*
+-----------------------------
+<<< main openai functions >>>
+-----------------------------
+*/
+
+// Get globally defined openaiClient, initialize it if nil
 func getOpenaiClient() *openai.Client {
 	if openaiClient == nil {
 		fmt.Println("Createing new OpenAI client")
@@ -126,6 +159,7 @@ func getOpenaiClient() *openai.Client {
 	return openaiClient
 }
 
+// Main openai chat completion, provide messages and a model, return a response
 func openaiChatCompletion(messages []openai.ChatCompletionMessageParamUnion, model string) string {
 	openaiClient = getOpenaiClient()
 
@@ -144,6 +178,8 @@ func openaiChatCompletion(messages []openai.ChatCompletionMessageParamUnion, mod
 	return chatCompletion.Choices[0].Message.Content
 }
 
+// Openai chat loop. Starts chatcompletion with `question`, then ask user input on loop.
+// Break the loop if user input is <exit>
 func openaiChat(question string, model string) {
 	inputBuffer := bufio.NewReader(os.Stdin)
 	var err error
@@ -175,6 +211,11 @@ func openaiChat(question string, model string) {
 	}
 }
 
+/*
+----------
+Entrypoint
+----------
+*/
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: %s [question] [optional-restart-conversation(bool)]\n", os.Args[0])
