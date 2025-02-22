@@ -3,101 +3,182 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/openai/openai-go"
 )
 
+// <<< constants >>>
+const HISTORY_PATH = "./history.json"
+
+// <<< type definitions >>>
+// Simple message structure for saving history to json
 type ChatMessage struct {
-	role    string
-	content string
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
-var OPENAI_CLIENT *openai.Client = nil
+// Simple conversation structure for saving history to json
+type ConversationHistory struct {
+	TimeStamp string         `json:"timeStamp"`
+	Messages  []*ChatMessage `json:"messages"`
+}
 
+// <<< Define some global vars >>>
+var openaiClient *openai.Client = nil
+
+// Track history
+var historyMessages = []*ChatMessage{}
+
+// track openai messages
+var conversationMessages = []openai.ChatCompletionMessageParamUnion{}
+
+// <<< Aux functions >>>
+func saveHistoryToJson() error {
+	history := ConversationHistory{
+		TimeStamp: time.Now().Format("2006-01-02T15:04:05"),
+		Messages:  historyMessages,
+	}
+
+	jsonBytes, err := json.MarshalIndent(history, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	jsonFile, err := os.Create(HISTORY_PATH)
+	if err != nil {
+		return err
+	}
+	defer jsonFile.Close()
+
+	_, err = jsonFile.Write(jsonBytes)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func loadHistoryJson() error {
+	jsonFile, err := os.Open(HISTORY_PATH)
+	if err != nil {
+		return err
+	}
+	defer jsonFile.Close()
+
+	history := ConversationHistory{}
+	json.NewDecoder(jsonFile).Decode(&history)
+	fmt.Printf("Loading conversation from: %s\n", history.TimeStamp)
+
+	historyMessages = history.Messages
+	for _, message := range historyMessages {
+		addConversationMessage(message)
+	}
+
+	return nil
+}
+
+func initConversation() {
+	fmt.Println("Initializing new conversation")
+	content := "You are a useful assistant"
+	historyMessages = []*ChatMessage{{Role: "system", Content: content}}
+	conversationMessages = []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(content)}
+}
+
+func loadConversation() {
+	if err := loadHistoryJson(); err != nil || len(historyMessages) == 0 {
+		fmt.Fprintln(os.Stderr, "Failed to load history")
+		initConversation()
+	}
+}
+
+func addConversationMessage(newMessage *ChatMessage) {
+	switch newMessage.Role {
+	case "system":
+		conversationMessages = append(conversationMessages, openai.SystemMessage(newMessage.Content))
+	case "assistant":
+		conversationMessages = append(conversationMessages, openai.AssistantMessage(newMessage.Content))
+	case "user":
+		conversationMessages = append(conversationMessages, openai.UserMessage(newMessage.Content))
+	default:
+		fmt.Fprintf(os.Stderr, "Invalid message role: %s\n", newMessage.Role)
+	}
+}
+
+func updateHistoryAndConversation(newMessage *ChatMessage) {
+	historyMessages = append(historyMessages, newMessage)
+	addConversationMessage(newMessage)
+}
+
+// <<< main openai functions >>>
 func getOpenaiClient() *openai.Client {
-	if OPENAI_CLIENT == nil {
-		OPENAI_CLIENT = openai.NewClient()
+	if openaiClient == nil {
+		fmt.Println("Createing new OpenAI client")
+		openaiClient = openai.NewClient()
 	}
-	return OPENAI_CLIENT
+	return openaiClient
 }
 
-func openaiChatCompletion(messages []*ChatMessage, model string) (string, error) {
-	openaiClient := getOpenaiClient()
-	var openaiChatMessages []openai.ChatCompletionMessageParamUnion
-
-	for _, message := range messages {
-		if message.role == "system" {
-			openaiChatMessages = append(openaiChatMessages, openai.AssistantMessage(message.content))
-			continue
-		}
-
-		if message.role == "user" {
-			openaiChatMessages = append(openaiChatMessages, openai.UserMessage(message.content))
-			continue
-		}
-
-		fmt.Fprintf(os.Stderr, "Invalid message role '%s'. Skipped\n", message.role)
-	}
+func openaiChatCompletion(messages []openai.ChatCompletionMessageParamUnion, model string) string {
+	openaiClient = getOpenaiClient()
 
 	chatCompletion, err := openaiClient.Chat.Completions.New(
 		context.TODO(),
 		openai.ChatCompletionNewParams{
-			Messages: openai.F(openaiChatMessages),
+			Messages: openai.F(messages),
 			Model:    openai.F(model),
 		},
 	)
 
 	if err != nil {
-		return "", err
+		panic(err)
 	}
 
-	return chatCompletion.Choices[0].Message.Content, nil
+	return chatCompletion.Choices[0].Message.Content
 }
 
 func openaiChat(question string, model string) {
 	inputBuffer := bufio.NewReader(os.Stdin)
-	messages := []*ChatMessage{{role: "system", content: "You are a useful general purpose assisstant"}}
+	var err error
 
 	fmt.Printf("user >> %s\n", question)
-
 	for {
-		userMessage := ChatMessage{role: "user", content: question}
-		messages = append(messages, &userMessage)
+		userMessage := ChatMessage{Role: "user", Content: question}
+		updateHistoryAndConversation(&userMessage)
 
-		response, err := openaiChatCompletion(messages, model)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed openai interaction. Error: %s\n", err)
-			panic(err)
-		}
-
+		response := openaiChatCompletion(conversationMessages, model)
 		fmt.Printf("assistant >> %s\n", response)
 
-		systemMessage := ChatMessage{role: "system", content: response}
-		messages = append(messages, &systemMessage)
+		assistantMessage := ChatMessage{Role: "assistant", Content: response}
+		updateHistoryAndConversation(&assistantMessage)
 
 		fmt.Printf("user >> ")
 		question, err = inputBuffer.ReadString('\n')
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to read user input")
+			fmt.Fprintf(os.Stderr, "There was an issue parsing user input. Error: %s\n", err)
 			break
 		}
 
 		question = strings.Trim(question, "\n ")
 		if question == "<exit>" {
-			fmt.Println("Requested exit")
+			fmt.Println("User requested exit")
 			break
 		}
-	}
 
+	}
 }
 
 func main() {
 	if len(os.Args) != 2 {
 		fmt.Fprintf(os.Stderr, "Usage: %s [question]\n", os.Args[0])
-		return
+		os.Exit(1)
 	}
+
+	loadConversation()
 	openaiChat(os.Args[1], openai.ChatModelGPT4oMini)
+	saveHistoryToJson()
 }
