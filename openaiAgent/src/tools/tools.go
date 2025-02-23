@@ -60,6 +60,9 @@ config: %+v
 `
 const DATA_PATH = "/home/zeke/Documents/Repos/goProjects/openaiAgent/data/Store_Sales_Price_Elasticity_Promotions_Data.parquet"
 const MODEL = openai.ChatModelGPT4oMini
+const LOOKUP_FUNC_NAME = "LookUpSalesData"
+const ANALYZE_FUNC_NAME = "AnalyzeSalesData"
+const VISUALIZE_FUNC_NAME = "GenerateVisualization"
 
 /*
 ------------------
@@ -67,7 +70,7 @@ Global definitions
 ------------------
 */
 
-var openaiClient = openai.NewClient()
+var openaiClient *openai.Client = nil
 
 var visualConfigSchema = generateSchema[VisualizationConfig]()
 
@@ -78,6 +81,14 @@ Aux functions
 */
 
 // Necessary for structured outputs
+func GetOpenaiClient() *openai.Client {
+	if openaiClient == nil {
+		openaiClient = openai.NewClient()
+	}
+
+	return openaiClient
+}
+
 func generateSchema[T any]() interface{} {
 	reflector := jsonschema.Reflector{
 		AllowAdditionalProperties: false,
@@ -133,7 +144,7 @@ func extractChartConfig(data string, visualizationGoal string) VisualizationConf
 
 	formattedPrompt := fmt.Sprintf(CHART_CONFIG_PROMPT, data, visualizationGoal)
 
-	response, err := openaiClient.Chat.Completions.New(
+	response, err := GetOpenaiClient().Chat.Completions.New(
 		context.TODO(),
 		openai.ChatCompletionNewParams{
 			Model: openai.F(MODEL),
@@ -173,7 +184,7 @@ func extractChartConfig(data string, visualizationGoal string) VisualizationConf
 func createChart(config VisualizationConfigData) string {
 	formattedPrompt := fmt.Sprintf(CREATE_CHART_PROMPT, config)
 
-	response, err := openaiClient.Chat.Completions.New(
+	response, err := GetOpenaiClient().Chat.Completions.New(
 		context.TODO(),
 		openai.ChatCompletionNewParams{
 			Model: openai.F(MODEL),
@@ -199,7 +210,7 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 		strings.Join(columns, ", "), tableName,
 	)
 
-	response, err := openaiClient.Chat.Completions.New(
+	response, err := GetOpenaiClient().Chat.Completions.New(
 		context.TODO(),
 		openai.ChatCompletionNewParams{
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
@@ -285,7 +296,7 @@ func LookupSalesData(prompt string) string {
 func AnalyzeSalesData(prompt string, data string) string {
 	var finalAnalysis string
 	formatedPrompt := fmt.Sprintf(DATA_ANALYSIS_PROMPT, data, prompt)
-	response, err := openaiClient.Chat.Completions.New(
+	response, err := GetOpenaiClient().Chat.Completions.New(
 		context.TODO(),
 		openai.ChatCompletionNewParams{
 			Model: openai.F(MODEL),
