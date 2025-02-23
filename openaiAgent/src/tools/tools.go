@@ -1,4 +1,4 @@
-package main
+package tools
 
 import (
 	"context"
@@ -69,7 +69,7 @@ Global definitions
 
 var openaiClient = openai.NewClient()
 
-var visualConfigSchema = GenerateSchema[VisualizationConfig]()
+var visualConfigSchema = generateSchema[VisualizationConfig]()
 
 /*
 -------------
@@ -78,7 +78,7 @@ Aux functions
 */
 
 // Necessary for structured outputs
-func GenerateSchema[T any]() interface{} {
+func generateSchema[T any]() interface{} {
 	reflector := jsonschema.Reflector{
 		AllowAdditionalProperties: false,
 		DoNotReference:            true,
@@ -191,12 +191,7 @@ func createChart(config VisualizationConfigData) string {
 	return strings.Trim(strings.ReplaceAll(response.Choices[0].Message.Content, "```python", ""), "`\n ")
 }
 
-/*
------------
-Agent tools
------------
-*/
-
+// Create a query from a user prompt
 func generateSqlQuery(prompt string, columns []string, tableName string) (string, error) {
 	formattedPrompt := fmt.Sprintf(
 		SQL_GENERATION_PROMPT,
@@ -222,7 +217,13 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 	return response.Choices[0].Message.Content, nil
 }
 
-func lookupSalesData(prompt string) string {
+/*
+-----------
+Agent tools
+-----------
+*/
+
+func LookupSalesData(prompt string) string {
 	tableName := "sales"
 
 	db, err := sql.Open("duckdb", "data.db")
@@ -281,7 +282,7 @@ func lookupSalesData(prompt string) string {
 	return strings.Join(resultData, "\n")
 }
 
-func analyzeSalesData(prompt string, data string) string {
+func AnalyzeSalesData(prompt string, data string) string {
 	var finalAnalysis string
 	formatedPrompt := fmt.Sprintf(DATA_ANALYSIS_PROMPT, data, prompt)
 	response, err := openaiClient.Chat.Completions.New(
@@ -308,21 +309,8 @@ func analyzeSalesData(prompt string, data string) string {
 	return finalAnalysis
 }
 
-func generateVisualization(data string, visualizationGoal string) string {
+func GenerateVisualization(data string, visualizationGoal string) string {
 	config := extractChartConfig(data, visualizationGoal)
 	code := createChart(config)
 	return code
-}
-
-/*
------------
-Entry Point
------------
-*/
-
-func main() {
-	exampleData := lookupSalesData("Show me all the sales from store 1320 on November 1st, 2021")
-	analyzeSalesData("What trends do you see in this data?", exampleData)
-	pythonCode := generateVisualization(exampleData, "A bar chart of sales by product SKU. Put the product SKU on the x-axis and the sales on the y-axis")
-	fmt.Printf("%s\n", pythonCode)
 }
