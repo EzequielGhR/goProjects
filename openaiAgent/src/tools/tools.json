@@ -1,0 +1,46 @@
+[
+    {
+        "type": "function",
+        "function": {
+            "name": "LookUpSalesData",
+            "description": "Look up data from Store Sales Price Elasticity Promotions dataset",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "The unchanged prompt that the user provided."}
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "AnalyzeSalesData", 
+            "description": "Analyze sales data to extract insights",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "data": {"type": "string", "description": "The LookUpSalesData tool's output."},
+                    "prompt": {"type": "string", "description": "The unchanged prompt that the user provided."}
+                },
+                "required": ["data", "prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "GenerateVisualization",
+            "description": "Generate Python code to create data visualizations",
+            "parameters": {
+                "type": "object", 
+                "properties": {
+                    "data": {"type": "string", "description": "The LookUpSalesData tool's output."},
+                    "visualizationGoal": {"type": "string", "description": "The goal of the visualization."}
+                },
+                "required": ["data", "visualizationGoal"]
+            }
+        }
+    }
+]
