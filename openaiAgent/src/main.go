@@ -13,22 +13,29 @@ import (
 	"github.com/openai/openai-go"
 )
 
+/*
+--------------------------
+Important type definitions
+--------------------------
+*/
 
 type VisualizationConfig struct {
 	ChartType string `json:"chartType" jsonschema_description:"Type of chart to generate"`
-	XAxis string `json:"xAxis" jsonschema_description:"Name of the X Axis column"`
-	YAxis string `json:"yAxis" jsonschema_description:"Name of the Y Axis column"`
-	Title string `json:"title" jsonschema_description:"Title of the chart"`
+	XAxis     string `json:"xAxis" jsonschema_description:"Name of the X Axis column"`
+	YAxis     string `json:"yAxis" jsonschema_description:"Name of the Y Axis column"`
+	Title     string `json:"title" jsonschema_description:"Title of the chart"`
 }
 
-type VisualizationConfigResponse struct {
-	ChartType string `json:"chartType" jsonschema_description:"Type of chart to generate"`
-	XAxis string `json:"xAxis" jsonschema_description:"Name of the X Axis column"`
-	YAxis string `json:"yAxis" jsonschema_description:"Name of the Y Axis column"`
-	Title string `json:"title" jsonschema_description:"Title of the chart"`
-	Data string
+type VisualizationConfigData struct {
+	Config VisualizationConfig
+	Data   string
 }
 
+/*
+---------------------------
+Prompts and other constants
+---------------------------
+*/
 
 const SQL_GENERATION_PROMPT = `
 Generate an SQL query based on a prompt. Do not reply with anything besides the SQL query.
@@ -40,23 +47,41 @@ The table name is: %s
 `
 const DATA_ANALYSIS_PROMPT = `
 Analyze the following data: %s
-Your job is to answer the following question: {prompt}
+Your job is to answer the following question: %s
 `
-
 const CHART_CONFIG_PROMPT = `
 Generate a chart configuration based on this data: %s
 The goal is to show: %s
 `
+const CREATE_CHART_PROMPT = `
+Wrtie python code to create a chart based on the following configuration.
+Only return the code, no other text.
+config: %+v
+`
 const DATA_PATH = "/home/zeke/Documents/Repos/goProjects/openaiAgent/data/Store_Sales_Price_Elasticity_Promotions_Data.parquet"
 const MODEL = openai.ChatModelGPT4oMini
 
+/*
+------------------
+Global definitions
+------------------
+*/
 
 var openaiClient = openai.NewClient()
 
+var visualConfigSchema = GenerateSchema[VisualizationConfig]()
+
+/*
+-------------
+Aux functions
+-------------
+*/
+
+// Necessary for structured outputs
 func GenerateSchema[T any]() interface{} {
 	reflector := jsonschema.Reflector{
 		AllowAdditionalProperties: false,
-		DoNotReference: true,
+		DoNotReference:            true,
 	}
 
 	var _v T
@@ -64,7 +89,113 @@ func GenerateSchema[T any]() interface{} {
 	return schema
 }
 
-var visualConfigSchema = GenerateSchema[VisualizationConfig]()
+// Extract rows as an array of strings
+func extractFromRows(rows *sql.Rows, columnsAmount int) ([]string, error) {
+	resultData := []string{}
+	dynamicValues := make([]interface{}, columnsAmount)
+	for i := range dynamicValues {
+		dynamicValues[i] = new(string)
+	}
+
+	for rows.Next() {
+		err := rows.Scan(dynamicValues...)
+		if err != nil {
+			return []string{}, err
+		}
+
+		rowValues := []string{}
+		for _, value := range dynamicValues {
+			content, ok := value.(*string)
+			if ok {
+				rowValues = append(rowValues, *content)
+			} else {
+				rowValues = append(rowValues, "")
+			}
+		}
+
+		resultData = append(resultData, strings.Join(rowValues, ", "))
+	}
+
+	return resultData, nil
+}
+
+// First part of data visualization tool. Extract a chart config to create code for visualization
+func extractChartConfig(data string, visualizationGoal string) VisualizationConfigData {
+	returnValue := VisualizationConfigData{
+		Config: VisualizationConfig{
+			ChartType: "line",
+			XAxis:     "date",
+			YAxis:     "value",
+			Title:     visualizationGoal,
+		},
+		Data: data,
+	}
+
+	formattedPrompt := fmt.Sprintf(CHART_CONFIG_PROMPT, data, visualizationGoal)
+
+	response, err := openaiClient.Chat.Completions.New(
+		context.TODO(),
+		openai.ChatCompletionNewParams{
+			Model: openai.F(MODEL),
+			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+				openai.UserMessage(formattedPrompt),
+			}),
+			ResponseFormat: openai.F[openai.ChatCompletionNewParamsResponseFormatUnion](
+				openai.ResponseFormatJSONSchemaParam{
+					Type: openai.F(openai.ResponseFormatJSONSchemaTypeJSONSchema),
+					JSONSchema: openai.F(openai.ResponseFormatJSONSchemaJSONSchemaParam{
+						Name:        openai.F("chartConfiguration"),
+						Description: openai.F("A simple configuration for a chart"),
+						Schema:      openai.F(visualConfigSchema),
+						Strict:      openai.Bool(true),
+					}),
+				},
+			),
+		},
+	)
+
+	if err != nil {
+		return returnValue
+	}
+
+	vconf := VisualizationConfig{}
+	err = json.Unmarshal([]byte(response.Choices[0].Message.Content), &vconf)
+	if err != nil {
+		return returnValue
+	}
+
+	returnValue.Config = vconf
+
+	return returnValue
+}
+
+// Second part of the visualization tool. Generate code from chart
+func createChart(config VisualizationConfigData) string {
+	formattedPrompt := fmt.Sprintf(CREATE_CHART_PROMPT, config)
+
+	response, err := openaiClient.Chat.Completions.New(
+		context.TODO(),
+		openai.ChatCompletionNewParams{
+			Model: openai.F(MODEL),
+			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+				openai.UserMessage(formattedPrompt),
+			}),
+		},
+	)
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed OpenAI interaction: %s\n", err)
+		return ""
+	}
+
+	return strings.Trim(strings.ReplaceAll(response.Choices[0].Message.Content, "```python", ""), "`\n ")
+}
+
+/*
+-----------
+Agent tools
+-----------
+*/
 
 func generateSqlQuery(prompt string, columns []string, tableName string) (string, error) {
 	formattedPrompt := fmt.Sprintf(
@@ -150,35 +281,6 @@ func lookupSalesData(prompt string) string {
 	return strings.Join(resultData, "\n")
 }
 
-func extractFromRows(rows *sql.Rows, columnsAmount int) ([]string, error) {
-	resultData := []string{}
-	dynamicValues := make([]interface{}, columnsAmount)
-	for i := range dynamicValues {
-		dynamicValues[i] = new(string)
-	}
-
-	for rows.Next() {
-		err := rows.Scan(dynamicValues...)
-		if err != nil {
-			return []string{}, err
-		}
-
-		rowValues := []string{}
-		for _, value := range dynamicValues {
-			content, ok := value.(*string)
-			if ok {
-				rowValues = append(rowValues, *content)
-			} else {
-				rowValues = append(rowValues, "")
-			}
-		}
-
-		resultData = append(resultData, strings.Join(rowValues, ", "))
-	}
-
-	return resultData, nil
-}
-
 func analyzeSalesData(prompt string, data string) string {
 	var finalAnalysis string
 	formatedPrompt := fmt.Sprintf(DATA_ANALYSIS_PROMPT, data, prompt)
@@ -206,63 +308,21 @@ func analyzeSalesData(prompt string, data string) string {
 	return finalAnalysis
 }
 
-func extractChartConfig(data string, visualizationGoal string) VisualizationConfigResponse {
-	returnValue := VisualizationConfigResponse{
-		ChartType: "line",
-		XAxis: "date",
-		YAxis: "value",
-		Title: visualizationGoal,
-		Data: data,
-	}
-
-	formattedPrompt := fmt.Sprintf(CHART_CONFIG_PROMPT, data, visualizationGoal)
-
-	response, err := openaiClient.Chat.Completions.New(
-		context.TODO(),
-		openai.ChatCompletionNewParams{
-			Model: openai.F(MODEL),
-			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-				openai.UserMessage(formattedPrompt),
-			}),
-			ResponseFormat: openai.F[openai.ChatCompletionNewParamsResponseFormatUnion](
-				openai.ResponseFormatJSONSchemaParam{
-					Type: openai.F(openai.ResponseFormatJSONSchemaTypeJSONSchema),
-					JSONSchema: openai.F(openai.ResponseFormatJSONSchemaJSONSchemaParam{
-						Schema: openai.F(visualConfigSchema),
-						Strict: openai.Bool(true),
-					}),
-				},
-			),
-		},
-	)
-
-	if err != nil {
-		panic(err)
-		return returnValue
-	}
-
-	vconf := VisualizationConfig{}
-	err = json.Unmarshal([]byte(response.Choices[0].Message.Content), &vconf)
-	if err != nil {
-		return returnValue
-	}
-
-	returnValue.ChartType = vconf.ChartType
-	returnValue.XAxis = vconf.XAxis
-	returnValue.YAxis = vconf.YAxis
-	returnValue.Title = vconf.Title
-
-	return returnValue
+func generateVisualization(data string, visualizationGoal string) string {
+	config := extractChartConfig(data, visualizationGoal)
+	code := createChart(config)
+	return code
 }
+
+/*
+-----------
+Entry Point
+-----------
+*/
 
 func main() {
 	exampleData := lookupSalesData("Show me all the sales from store 1320 on November 1st, 2021")
-	//fmt.Println(exampleData)
-
-	// analysis := analyzeSalesData("What trends do you see in this data", exampleData)
-	// fmt.Println(analysis)
-	fmt.Printf("Schema: %+v\n", visualConfigSchema)
-
-	config := extractChartConfig(exampleData, "A bat chart of sales by product SKU. Put the product SKU on the x-axis and the sales on the y-axis")
-	fmt.Printf("%+v\n", config)
+	analyzeSalesData("What trends do you see in this data?", exampleData)
+	pythonCode := generateVisualization(exampleData, "A bar chart of sales by product SKU. Put the product SKU on the x-axis and the sales on the y-axis")
+	fmt.Printf("%s\n", pythonCode)
 }

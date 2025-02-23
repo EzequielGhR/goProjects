@@ -28,3 +28,6 @@ go.work.sum
 *.json
 *.db
 *.db.wal
+
+# Python
+.venv
