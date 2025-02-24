@@ -25,4 +25,9 @@ go.work.sum
 .env
 
 # Generic
-*.json
+openaiChat/*.json
+*.db
+*.db.wal
+
+# Python
+.venv
