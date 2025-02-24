@@ -19,15 +19,15 @@ Important type definitions
 --------------------------
 */
 
-type VisualizationConfig struct {
+type visualizationConfig struct {
 	ChartType string `json:"chartType" jsonschema_description:"Type of chart to generate"`
 	XAxis     string `json:"xAxis" jsonschema_description:"Name of the X Axis column"`
 	YAxis     string `json:"yAxis" jsonschema_description:"Name of the Y Axis column"`
 	Title     string `json:"title" jsonschema_description:"Title of the chart"`
 }
 
-type VisualizationConfigData struct {
-	Config VisualizationConfig
+type visualizationConfigData struct {
+	Config visualizationConfig
 	Data   string
 }
 
@@ -37,7 +37,7 @@ Prompts and other constants
 ---------------------------
 */
 
-const SQL_GENERATION_PROMPT = `
+const sqlGenerationPrompt = `
 Generate an SQL query based on a prompt. Do not reply with anything besides the SQL query.
 The prompt is:
 %s
@@ -45,24 +45,24 @@ The prompt is:
 The available columns are: %s
 The table name is: %s
 `
-const DATA_ANALYSIS_PROMPT = `
+const dataAnalysisPrompt = `
 Analyze the following data: %s
 Your job is to answer the following question: %s
 `
-const CHART_CONFIG_PROMPT = `
+const chartConfigPrompt = `
 Generate a chart configuration based on this data: %s
 The goal is to show: %s
 `
-const CREATE_CHART_PROMPT = `
+const createChartPrompt = `
 Wrtie python code to create a chart based on the following configuration.
 Only return the code, no other text.
 config: %+v
 `
-const DATA_PATH = "/home/zeke/Documents/Repos/goProjects/openaiAgent/data/Store_Sales_Price_Elasticity_Promotions_Data.parquet"
-const MODEL = openai.ChatModelGPT4oMini
-const LOOKUP_FUNC_NAME = "LookUpSalesData"
-const ANALYZE_FUNC_NAME = "AnalyzeSalesData"
-const VISUALIZE_FUNC_NAME = "GenerateVisualization"
+const dataPath = "/home/zeke/Documents/Repos/goProjects/openaiAgent/data/Store_Sales_Price_Elasticity_Promotions_Data.parquet"
+const Model = openai.ChatModelGPT4oMini
+const LookUpFuncName = "LookUpSalesData"
+const AnalyzeFuncName = "AnalyzeSalesData"
+const VisualizeFuncName = "GenerateVisualization"
 
 /*
 ------------------
@@ -72,7 +72,7 @@ Global definitions
 
 var openaiClient *openai.Client = nil
 
-var visualConfigSchema = generateSchema[VisualizationConfig]()
+var visualConfigSchema = generateSchema[visualizationConfig]()
 
 /*
 -------------
@@ -140,9 +140,9 @@ func extractFromRows(rows *sql.Rows, columnsAmount int) ([]string, error) {
 }
 
 // First part of data visualization tool. Extract a chart config to create code for visualization
-func extractChartConfig(data string, visualizationGoal string) VisualizationConfigData {
-	returnValue := VisualizationConfigData{
-		Config: VisualizationConfig{
+func extractChartConfig(data string, visualizationGoal string) visualizationConfigData {
+	returnValue := visualizationConfigData{
+		Config: visualizationConfig{
 			ChartType: "line",
 			XAxis:     "date",
 			YAxis:     "value",
@@ -151,13 +151,13 @@ func extractChartConfig(data string, visualizationGoal string) VisualizationConf
 		Data: data,
 	}
 
-	formattedPrompt := fmt.Sprintf(CHART_CONFIG_PROMPT, data, visualizationGoal)
+	formattedPrompt := fmt.Sprintf(chartConfigPrompt, data, visualizationGoal)
 
 	// Use structure outputs to get the chart config as expected
 	response, err := GetOpenaiClient().Chat.Completions.New(
 		context.TODO(),
 		openai.ChatCompletionNewParams{
-			Model: openai.F(MODEL),
+			Model: openai.F(Model),
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
 				openai.UserMessage(formattedPrompt),
 			}),
@@ -183,7 +183,7 @@ func extractChartConfig(data string, visualizationGoal string) VisualizationConf
 	jsonData := strings.Trim(strings.ReplaceAll(response.Choices[0].Message.Content, "```json", ""), "`\n ")
 
 	// Convert response to json
-	vconf := VisualizationConfig{}
+	vconf := visualizationConfig{}
 	err = json.Unmarshal([]byte(jsonData), &vconf)
 	if err != nil {
 		log.Printf("WARNING: %s\n", err)
@@ -196,13 +196,13 @@ func extractChartConfig(data string, visualizationGoal string) VisualizationConf
 }
 
 // Second part of the visualization tool. Generate code from chart
-func createChart(config VisualizationConfigData) string {
-	formattedPrompt := fmt.Sprintf(CREATE_CHART_PROMPT, config)
+func createChart(config visualizationConfigData) string {
+	formattedPrompt := fmt.Sprintf(createChartPrompt, config)
 
 	response, err := GetOpenaiClient().Chat.Completions.New(
 		context.TODO(),
 		openai.ChatCompletionNewParams{
-			Model: openai.F(MODEL),
+			Model: openai.F(Model),
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
 				openai.UserMessage(formattedPrompt),
 			}),
@@ -220,7 +220,7 @@ func createChart(config VisualizationConfigData) string {
 // Create a query from a user prompt
 func generateSqlQuery(prompt string, columns []string, tableName string) (string, error) {
 	formattedPrompt := fmt.Sprintf(
-		SQL_GENERATION_PROMPT,
+		sqlGenerationPrompt,
 		prompt,
 		strings.Join(columns, ", "), tableName,
 	)
@@ -250,7 +250,7 @@ Agent tools
 */
 
 // Tool for sales lookup
-func LookupSalesData(prompt string) string {
+func LookUpSalesData(prompt string) string {
 	tableName := "sales"
 
 	// Open or Creae DB
@@ -266,7 +266,7 @@ func LookupSalesData(prompt string) string {
 			CREATE TABLE IF NOT EXISTS %s AS
 			SELECT * FROM read_parquet('%s')`,
 			tableName,
-			DATA_PATH,
+			dataPath,
 		),
 	)
 
@@ -317,11 +317,11 @@ func LookupSalesData(prompt string) string {
 // Tool for data analysis
 func AnalyzeSalesData(prompt string, data string) string {
 	var finalAnalysis string
-	formatedPrompt := fmt.Sprintf(DATA_ANALYSIS_PROMPT, data, prompt)
+	formatedPrompt := fmt.Sprintf(dataAnalysisPrompt, data, prompt)
 	response, err := GetOpenaiClient().Chat.Completions.New(
 		context.TODO(),
 		openai.ChatCompletionNewParams{
-			Model: openai.F(MODEL),
+			Model: openai.F(Model),
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
 				openai.UserMessage(formatedPrompt),
 			}),
