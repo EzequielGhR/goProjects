@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"traceTools"
 
 	"github.com/invopop/jsonschema"
 	_ "github.com/marcboeker/go-duckdb"
 	"github.com/openai/openai-go"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 /*
@@ -104,11 +107,9 @@ func generateSchema[T any]() interface{} {
 
 // Extract rows as an array of strings
 func extractFromRows(rows *sql.Rows, columnsAmount int) ([]string, error) {
-	// Initialize return value
-	resultData := []string{}
-
-	// Create an array of interfaces with the size being the amount of columns
-	// Each interface will have a string pointer for later populatin with rows.Scan
+	// Create two arrays of interfaces with the size being the amount of columns
+	// One will be defined as pointers to the values of the other. That way providing
+	// it to rows.Scan, will alter the other one's values by reference
 	dynamicValues := make([]any, columnsAmount)
 	pointers := make([]any, columnsAmount)
 
@@ -117,14 +118,16 @@ func extractFromRows(rows *sql.Rows, columnsAmount int) ([]string, error) {
 	}
 
 	log.Println("Processing rows to strings")
+	resultData := []string{}
 	for rows.Next() {
-		// Scan row values into previously created string pointers
+		// Scan row values into previously created interface pointers
 		err := rows.Scan(pointers...)
 		if err != nil {
 			return []string{}, err
 		}
 
 		rowValues := []string{}
+		// dynamicValues' values were altered by reference, so it now contains the fields
 		for _, value := range dynamicValues {
 			// TODO: Find better ways to do it. For now just lazy print interface to convert to string
 			content := fmt.Sprintf("%v", value)
@@ -249,11 +252,21 @@ Agent tools
 
 // Tool for sales lookup
 func LookUpSalesData(prompt string) string {
+	_, span := traceTools.GetActiveTracer().Start(context.Background(), "LookUpTool")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("ai.model", Model),
+		attribute.String("ai.input", prompt),
+	)
+
 	tableName := "sales"
 
-	// Open or Creae DB
+	// Open or Create DB
 	db, err := sql.Open("duckdb", "data.db")
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		span.SetStatus(codes.Error, "failed lookup interaction")
 		return fmt.Sprintf("Failed to open Database: %s\n", err)
 	}
 	defer db.Close()
@@ -269,6 +282,8 @@ func LookUpSalesData(prompt string) string {
 	)
 
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		span.SetStatus(codes.Error, "failed lookup interaction")
 		return fmt.Sprintf("Failed to execute table creation SQL: %s\n", err)
 	}
 
@@ -278,16 +293,22 @@ func LookUpSalesData(prompt string) string {
 	)
 
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		span.SetStatus(codes.Error, "failed lookup interaction")
 		return fmt.Sprintf("Failed to fetch database columns: %s\n", err)
 	}
 
 	columns, err := result.Columns()
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		span.SetStatus(codes.Error, "failed lookup interaction")
 		return fmt.Sprintf("Failed to fetch database columns: %s\n", err)
 	}
 
 	sqlQuery, err := generateSqlQuery(prompt, columns, tableName)
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		span.SetStatus(codes.Error, "failed lookup interaction")
 		return fmt.Sprintf("Failed to generate SQL query: %s\n", err)
 	}
 
@@ -299,28 +320,49 @@ func LookUpSalesData(prompt string) string {
 
 	rows, err := db.Query(sqlQuery)
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		span.SetStatus(codes.Error, "failed lookup interaction")
 		return fmt.Sprintf("Failed to select data from database: %s\n", err)
 	}
 
 	columns, err = rows.Columns()
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		span.SetStatus(codes.Error, "failed lookup interaction")
 		return fmt.Sprintf("Failed to fetch query result columns: %s\n", err)
 	}
 
 	resultData := []string{strings.Join(columns, ", ")}
 	extractedRows, err := extractFromRows(rows, len(columns))
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		span.SetStatus(codes.Error, "failed lookup interaction")
 		return fmt.Sprintf("Failed to extract data from columns: %s\n", err)
 	}
 
 	resultData = append(resultData, extractedRows...)
-	return strings.Join(resultData, "\n")
+	returnValue := strings.Join(resultData, "\n")
+	
+	span.SetAttributes(attribute.String("ai.output", returnValue))
+	span.SetStatus(codes.Ok, "Finished data lookup")
+
+	return returnValue
 }
 
 // Tool for data analysis
 func AnalyzeSalesData(prompt string, data string) string {
 	var finalAnalysis string
+
 	formatedPrompt := fmt.Sprintf(dataAnalysisPrompt, data, prompt)
+
+	_, span := traceTools.GetActiveTracer().Start(context.Background(), "AnalyzeTool")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("ai.model", Model),
+		attribute.String("ai.input", formatedPrompt),
+	)
+
 	response, err := GetOpenaiClient().Chat.Completions.New(
 		context.TODO(),
 		openai.ChatCompletionNewParams{
@@ -332,22 +374,35 @@ func AnalyzeSalesData(prompt string, data string) string {
 	)
 
 	if err != nil {
-		log.Printf("There was an issue with the OpenAI interaction: %s\n", err)
+		log.Printf("WARNING: There was an issue with the OpenAI interaction: %s\n", err)
 		finalAnalysis = ""
 	} else {
 		finalAnalysis = strings.Trim(response.Choices[0].Message.Content, "\n ")
 	}
 
 	if finalAnalysis == "" {
+		span.SetStatus(codes.Error, "Failed analyze interaction")
 		return "No analysis could be generated"
 	}
 
+	span.SetStatus(codes.Ok, "Succesful analyze interaction")
 	return finalAnalysis
 }
 
 // Tool for data visualization
 func GenerateVisualization(data string, visualizationGoal string) string {
+	_, span := traceTools.GetActiveTracer().Start(context.Background(), "VisualizationTool")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("ai.model", Model),
+		attribute.StringSlice("ai.input", []string{data, visualizationGoal}),
+	)
+
 	config := extractChartConfig(data, visualizationGoal)
 	code := createChart(config)
+
+	span.SetAttributes(attribute.String("ai.output", code))
+	span.SetStatus(codes.Ok, "successful visualization interaction")
 	return code
 }
