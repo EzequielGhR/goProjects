@@ -109,28 +109,26 @@ func extractFromRows(rows *sql.Rows, columnsAmount int) ([]string, error) {
 
 	// Create an array of interfaces with the size being the amount of columns
 	// Each interface will have a string pointer for later populatin with rows.Scan
-	dynamicValues := make([]interface{}, columnsAmount)
+	dynamicValues := make([]any, columnsAmount)
+	pointers := make([]any, columnsAmount)
+
 	for i := range dynamicValues {
-		dynamicValues[i] = new(string)
+		pointers[i] = &dynamicValues[i]
 	}
 
 	log.Println("Processing rows to strings")
 	for rows.Next() {
 		// Scan row values into previously created string pointers
-		err := rows.Scan(dynamicValues...)
+		err := rows.Scan(pointers...)
 		if err != nil {
 			return []string{}, err
 		}
 
 		rowValues := []string{}
 		for _, value := range dynamicValues {
-			// Type assert to string pointers, derreference and append to row values
-			content, ok := value.(*string)
-			if ok {
-				rowValues = append(rowValues, *content)
-			} else {
-				rowValues = append(rowValues, "")
-			}
+			// TODO: Find better ways to do it. For now just lazy print interface to convert to string
+			content := fmt.Sprintf("%v", value)
+			rowValues = append(rowValues, content)
 		}
 
 		resultData = append(resultData, strings.Join(rowValues, ", "))
@@ -302,6 +300,11 @@ func LookUpSalesData(prompt string) string {
 	rows, err := db.Query(sqlQuery)
 	if err != nil {
 		return fmt.Sprintf("Failed to select data from database: %s\n", err)
+	}
+
+	columns, err = rows.Columns()
+	if err != nil {
+		return fmt.Sprintf("Failed to fetch query result columns: %s\n", err)
 	}
 
 	resultData := []string{strings.Join(columns, ", ")}

@@ -5,9 +5,14 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"strings"
 	"tools"
+	"traceTools"
 
 	"github.com/openai/openai-go"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 /*
@@ -91,7 +96,17 @@ func handleToolCalls(
 	toolCalls []openai.ChatCompletionMessageToolCall,
 	messages []openai.ChatCompletionMessageParamUnion,
 ) []openai.ChatCompletionMessageParamUnion {
+	tracer := traceTools.GetActiveTracer()
+	_, span := tracer.Start(context.Background(), "handleToolCalls")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("ai.model", tools.Model))
+
+	inputAttr := []string{}
+	outputAttr := []string{}
 	for _, toolCall := range toolCalls {
+		inputAttr = append(inputAttr, toolCall.JSON.RawJSON())
+
 		functionName := toolCall.Function.Name
 		functionArgs := toolFunctionArgs{}
 
@@ -99,7 +114,8 @@ func handleToolCalls(
 
 		err := json.Unmarshal([]byte(toolCall.Function.Arguments), &functionArgs)
 		if err != nil {
-			panic(err)
+			span.SetStatus(codes.Error, "There was an issue unwraping function args")
+			log.Fatal(err)
 		}
 
 		result := ""
@@ -114,9 +130,17 @@ func handleToolCalls(
 			log.Fatal("Invalid function name")
 		}
 
-		messages = append(messages, openai.ToolMessage(toolCall.ID, result))
+		response := openai.ToolMessage(toolCall.ID, result)
+		messages = append(messages, response)
+		outputAttr = append(outputAttr, response.Content.String())
 	}
 
+	span.SetAttributes(
+		attribute.String("ai.input", "["+strings.Join(inputAttr, ",\n")+"["),
+		attribute.String("ai.output", strings.Join(outputAttr, "\n")),
+	)
+
+	span.SetStatus(codes.Ok, "Finished tools processing")
 	return messages
 }
 
@@ -216,11 +240,19 @@ Main Agent function
 */
 
 func RunAgent[T AgentInput](messages T) string {
+	tracer := traceTools.GetActiveTracer()
 	openaiMessages := formatAgentMessages(messages)
 	openaiToolParams := convertToolConfigToParams(loadToolsJson())
 
 	for {
 		log.Println("Making router call for OpenAI")
+		_, span := tracer.Start(context.Background(), "RouterCall", trace.WithSpanKind(trace.SpanKindInternal))
+
+		inputMessage := openai.F(openaiMessages[len(openaiMessages)-1]).String()
+		span.SetAttributes(
+			attribute.String("ai.model", tools.Model),
+			attribute.String("ai.input", inputMessage),
+		)
 
 		response, err := tools.GetOpenaiClient().Chat.Completions.New(
 			context.TODO(),
@@ -233,17 +265,30 @@ func RunAgent[T AgentInput](messages T) string {
 		)
 
 		if err != nil {
+			log.Println("Here")
+			span.SetStatus(codes.Error, "There was an issue with the openai interaction")
+			span.End()
 			log.Fatal(err)
 		}
 
 		// Add the response to a tool call message, needed for next steps
-		openaiMessages = append(openaiMessages, response.Choices[0].Message)
+		responseMessage := response.Choices[0].Message
+		openaiMessages = append(openaiMessages, responseMessage)
 		toolCalls := response.Choices[0].Message.ToolCalls
+
+		rawJsonToolCalls := []string{}
+		for _, toolCall := range toolCalls {
+			rawJsonToolCalls = append(rawJsonToolCalls, toolCall.JSON.RawJSON())
+		}
+
+		span.SetStatus(codes.Ok, "Successful tool call iteration")
 
 		if len(toolCalls) != 0 {
 			log.Println("Processing tool calls ...")
+			span.SetAttributes(attribute.String("ai.output", "["+strings.Join(rawJsonToolCalls, ",\n")+"]"))
 			openaiMessages = handleToolCalls(toolCalls, openaiMessages)
 		} else {
+			span.SetAttributes(attribute.String("ai.output", responseMessage.Content))
 			log.Println("No tool calls, returning final answer")
 			return response.Choices[0].Message.Content
 		}
