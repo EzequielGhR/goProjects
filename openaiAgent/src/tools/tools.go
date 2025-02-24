@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
+	"log"
 	"strings"
 
 	"github.com/invopop/jsonschema"
@@ -80,35 +80,43 @@ Aux functions
 -------------
 */
 
-// Necessary for structured outputs
+// Use the same client for all calls, here and on main logic
 func GetOpenaiClient() *openai.Client {
 	if openaiClient == nil {
+		log.Println("Creating new OpenAI client")
 		openaiClient = openai.NewClient()
 	}
 
 	return openaiClient
 }
 
+// Necessary for structured outputs
 func generateSchema[T any]() interface{} {
 	reflector := jsonschema.Reflector{
 		AllowAdditionalProperties: false,
 		DoNotReference:            true,
 	}
 
-	var _v T
-	schema := reflector.Reflect(_v)
+	var v T
+	schema := reflector.Reflect(v)
 	return schema
 }
 
 // Extract rows as an array of strings
 func extractFromRows(rows *sql.Rows, columnsAmount int) ([]string, error) {
+	// Initialize return value
 	resultData := []string{}
+
+	// Create an array of interfaces with the size being the amount of columns
+	// Each interface will have a string pointer for later populatin with rows.Scan
 	dynamicValues := make([]interface{}, columnsAmount)
 	for i := range dynamicValues {
 		dynamicValues[i] = new(string)
 	}
 
+	log.Println("Processing rows to strings")
 	for rows.Next() {
+		// Scan row values into previously created string pointers
 		err := rows.Scan(dynamicValues...)
 		if err != nil {
 			return []string{}, err
@@ -116,6 +124,7 @@ func extractFromRows(rows *sql.Rows, columnsAmount int) ([]string, error) {
 
 		rowValues := []string{}
 		for _, value := range dynamicValues {
+			// Type assert to string pointers, derreference and append to row values
 			content, ok := value.(*string)
 			if ok {
 				rowValues = append(rowValues, *content)
@@ -144,6 +153,7 @@ func extractChartConfig(data string, visualizationGoal string) VisualizationConf
 
 	formattedPrompt := fmt.Sprintf(CHART_CONFIG_PROMPT, data, visualizationGoal)
 
+	// Use structure outputs to get the chart config as expected
 	response, err := GetOpenaiClient().Chat.Completions.New(
 		context.TODO(),
 		openai.ChatCompletionNewParams{
@@ -166,12 +176,17 @@ func extractChartConfig(data string, visualizationGoal string) VisualizationConf
 	)
 
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
 		return returnValue
 	}
 
+	jsonData := strings.Trim(strings.ReplaceAll(response.Choices[0].Message.Content, "```json", ""), "`\n ")
+
+	// Convert response to json
 	vconf := VisualizationConfig{}
-	err = json.Unmarshal([]byte(response.Choices[0].Message.Content), &vconf)
+	err = json.Unmarshal([]byte(jsonData), &vconf)
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
 		return returnValue
 	}
 
@@ -195,7 +210,7 @@ func createChart(config VisualizationConfigData) string {
 	)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed OpenAI interaction: %s\n", err)
+		log.Printf("WARNING: Failed OpenAI interaction: %s\n", err)
 		return ""
 	}
 
@@ -221,7 +236,7 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 	)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed OpenAI interaction: %s\n", err)
+		log.Printf("WARNING: Failed OpenAI interaction: %s\n", err)
 		return "", err
 	}
 
@@ -234,15 +249,18 @@ Agent tools
 -----------
 */
 
+// Tool for sales lookup
 func LookupSalesData(prompt string) string {
 	tableName := "sales"
 
+	// Open or Creae DB
 	db, err := sql.Open("duckdb", "data.db")
 	if err != nil {
 		return fmt.Sprintf("Failed to open Database: %s\n", err)
 	}
 	defer db.Close()
 
+	// Create table
 	_, err = db.Exec(
 		fmt.Sprintf(`
 			CREATE TABLE IF NOT EXISTS %s AS
@@ -256,6 +274,7 @@ func LookupSalesData(prompt string) string {
 		return fmt.Sprintf("Failed to execute table creation SQL: %s\n", err)
 	}
 
+	// Do a simple non-match query to return table columns
 	result, err := db.Query(
 		fmt.Sprintf("SELECT * FROM %s WHERE 1=2", tableName),
 	)
@@ -278,6 +297,8 @@ func LookupSalesData(prompt string) string {
 	sqlQuery = strings.ReplaceAll(sqlQuery, "```sql", "")
 	sqlQuery = strings.Trim(sqlQuery, "`")
 
+	log.Printf("Query to be used: %s\n", sqlQuery)
+
 	rows, err := db.Query(sqlQuery)
 	if err != nil {
 		return fmt.Sprintf("Failed to select data from database: %s\n", err)
@@ -293,6 +314,7 @@ func LookupSalesData(prompt string) string {
 	return strings.Join(resultData, "\n")
 }
 
+// Tool for data analysis
 func AnalyzeSalesData(prompt string, data string) string {
 	var finalAnalysis string
 	formatedPrompt := fmt.Sprintf(DATA_ANALYSIS_PROMPT, data, prompt)
@@ -307,7 +329,7 @@ func AnalyzeSalesData(prompt string, data string) string {
 	)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "There was an issue with the OpenAI interaction: %s\n", err)
+		log.Printf("There was an issue with the OpenAI interaction: %s\n", err)
 		finalAnalysis = ""
 	} else {
 		finalAnalysis = strings.Trim(response.Choices[0].Message.Content, "\n ")
@@ -320,6 +342,7 @@ func AnalyzeSalesData(prompt string, data string) string {
 	return finalAnalysis
 }
 
+// Tool for data visualization
 func GenerateVisualization(data string, visualizationGoal string) string {
 	config := extractChartConfig(data, visualizationGoal)
 	code := createChart(config)
