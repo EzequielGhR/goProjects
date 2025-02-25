@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"traceTools"
 
@@ -59,7 +60,6 @@ Wrtie python code to create a chart based on the following configuration.
 Only return the code, no other text.
 config: %+v
 `
-const dataPath = "/home/zeke/Documents/Repos/goProjects/openaiAgent/data/Store_Sales_Price_Elasticity_Promotions_Data.parquet"
 const tableName = "sales"
 const Model = openai.ChatModelGPT4oMini
 const LookUpFuncName = "LookUpSalesData"
@@ -74,12 +74,22 @@ Global definitions
 
 var openaiClient *openai.Client = nil
 var visualConfigSchema = generateSchema[visualizationConfig]()
+var dataPath string = "./Store_Sales_Price_Elasticity_Promotions_Data.parquet"
 
 /*
 -------------
 Aux functions
 -------------
 */
+func AssertDataPath(providedPath string) {
+	if strings.HasSuffix(providedPath, ".parquet") {
+		dataPath = providedPath
+	}
+
+	if _, err := os.Stat(dataPath); err != nil {
+		log.Fatalf("No parquet data file found at %s\n", dataPath)
+	}
+}
 
 // Use the same client for all calls, here and on main logic
 func GetOpenaiClient() *openai.Client {
@@ -160,10 +170,7 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 	}
 
 	formattedPrompt := fmt.Sprintf(chartConfigPrompt, data, visualizationGoal)
-	_, span := traceTools.GetActiveTracer().Start(
-		context.Background(),
-		"ChartConfig",
-	)
+	span := traceTools.StartOpenInferenceSpan("ExtractChart", traceTools.ChainKind)
 	defer span.End()
 
 	traceTools.SetSpanInput(span, formattedPrompt)
@@ -219,10 +226,7 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 // Second part of the visualization tool. Generate code from chart
 func createChart(config visualizationConfigData) string {
 	formattedPrompt := fmt.Sprintf(createChartPrompt, config)
-	_, span := traceTools.GetActiveTracer().Start(
-		context.Background(),
-		"CreateChart",
-	)
+	span := traceTools.StartOpenInferenceSpan("CreateChart", traceTools.ChainKind)
 	defer span.End()
 
 	traceTools.SetSpanInput(span, formattedPrompt)
@@ -258,10 +262,7 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 		strings.Join(columns, ", "), tableName,
 	)
 
-	_, span := traceTools.GetActiveTracer().Start(
-		context.Background(),
-		"SqlGeneration",
-	)
+	span := traceTools.StartOpenInferenceSpan("SqlGeneration", traceTools.ChainKind)
 	defer span.End()
 
 	traceTools.SetSpanInput(span, formattedPrompt)
@@ -298,10 +299,7 @@ Agent tools
 
 // Tool for sales lookup
 func LookUpSalesData(prompt string) string {
-	_, span := traceTools.GetActiveTracer().Start(
-		context.Background(),
-		"LookUpTool",
-	)
+	span := traceTools.StartOpenInferenceSpan("LookUpTool", traceTools.ToolKind)
 	defer span.End()
 
 	traceTools.SetSpanInput(span, prompt)
@@ -394,10 +392,7 @@ func LookUpSalesData(prompt string) string {
 func AnalyzeSalesData(prompt string, data string) string {
 	formatedPrompt := fmt.Sprintf(dataAnalysisPrompt, data, prompt)
 
-	_, span := traceTools.GetActiveTracer().Start(
-		context.Background(),
-		"AnalyzeTool",
-	)
+	span := traceTools.StartOpenInferenceSpan("AnalyzeTool", traceTools.ToolKind)
 	defer span.End()
 
 	traceTools.SetSpanInput(span, formatedPrompt)
@@ -433,10 +428,7 @@ func AnalyzeSalesData(prompt string, data string) string {
 
 // Tool for data visualization
 func GenerateVisualization(data string, visualizationGoal string) string {
-	_, span := traceTools.GetActiveTracer().Start(
-		context.Background(),
-		"VisualizationTool",
-	)
+	span := traceTools.StartOpenInferenceSpan("VisualizationTool", traceTools.ToolKind)
 	defer span.End()
 
 	traceTools.SetSpanInput(span, []string{data, visualizationGoal})

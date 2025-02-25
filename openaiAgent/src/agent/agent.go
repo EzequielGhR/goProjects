@@ -96,10 +96,7 @@ func handleToolCalls(
 	messages []openai.ChatCompletionMessageParamUnion,
 ) []openai.ChatCompletionMessageParamUnion {
 	// Start Span
-	_, span := traceTools.GetActiveTracer().Start(
-		context.Background(),
-		"handleToolCalls",
-	)
+	span := traceTools.StartOpenInferenceSpan("handleToolCalls", traceTools.ChainKind)
 	defer span.End()
 
 	// Track input and output for span
@@ -257,10 +254,7 @@ func RunAgent[T AgentInput](messages T) string {
 
 	for {
 		log.Println("Making router call for OpenAI and starting new span")
-		_, span := traceTools.GetActiveTracer().Start(
-			context.Background(),
-			"RouterCall",
-		)
+		span := traceTools.StartOpenInferenceSpan("RouterCall", traceTools.ChainKind)
 
 		inputMessage := openai.F(openaiMessages[len(openaiMessages)-1]).String()
 		traceTools.SetSpanInput(span, inputMessage)

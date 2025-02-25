@@ -21,7 +21,26 @@ type SpanDataType interface {
 	string | []string | int | bool
 }
 
+type OpenInferenceSpanKind string
+
+const (
+	AgentKind     OpenInferenceSpanKind = "agent"
+	ChainKind     OpenInferenceSpanKind = "chain"
+	EmbeddingKind OpenInferenceSpanKind = "embedding"
+	EvaluatorKind OpenInferenceSpanKind = "evaluator"
+	GuardrailKind OpenInferenceSpanKind = "guardrail"
+	LLMKind       OpenInferenceSpanKind = "llm"
+	RerankerKind  OpenInferenceSpanKind = "reranker"
+	RetrieverKind OpenInferenceSpanKind = "retriever"
+	ToolKind      OpenInferenceSpanKind = "tool"
+	UnknownKind   OpenInferenceSpanKind = "unknown"
+)
+
 const projectName = "Zeke-Go-OpenAI-Agent"
+const openInferenceProjectNameKey = "openinference.project.name"
+const openInferenceSpanKindKey = "openinference.span.kind"
+const openInferenceInputKey = "input.value"
+const openInferenceOutputKey = "output.value"
 
 var tracerProvider *traceSdk.TracerProvider
 var activeTracer trace.Tracer = nil
@@ -65,7 +84,7 @@ func GetTracerProvider() *traceSdk.TracerProvider {
 		traceSdk.WithBatcher(exporter),
 		traceSdk.WithResource(resource.NewWithAttributes(
 			semconv.SchemaURL,
-			attribute.String("service.name", projectName),
+			attribute.String(openInferenceProjectNameKey, projectName),
 		)),
 	)
 
@@ -88,6 +107,20 @@ func GetActiveTracer() trace.Tracer {
 	return activeTracer
 }
 
+// Start a new Span
+func StartOpenInferenceSpan(spanName string, openInferenceSpanKind OpenInferenceSpanKind) trace.Span {
+	_, span := GetActiveTracer().Start(
+		context.Background(),
+		spanName,
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(
+			attribute.String(openInferenceSpanKindKey, strings.ToUpper(string(openInferenceSpanKind))),
+		),
+	)
+
+	return span
+}
+
 func SetSpanAttr[T SpanDataType](span trace.Span, key string, input T) {
 	var attr attribute.KeyValue
 	switch any(input).(type) {
@@ -103,11 +136,11 @@ func SetSpanAttr[T SpanDataType](span trace.Span, key string, input T) {
 }
 
 func SetSpanInput[T SpanDataType](span trace.Span, input T) {
-	SetSpanAttr(span, "inputData", input)
+	SetSpanAttr(span, openInferenceInputKey, input)
 }
 
 func SetSpanOutput[T SpanDataType](span trace.Span, output T) {
-	SetSpanAttr(span, "outputData", output)
+	SetSpanAttr(span, openInferenceOutputKey, output)
 }
 
 func SetSpanModel(span trace.Span, model string) {
