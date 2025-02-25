@@ -74,20 +74,21 @@ Global definitions
 
 var openaiClient *openai.Client = nil
 var visualConfigSchema = generateSchema[visualizationConfig]()
-var dataPath string = "./Store_Sales_Price_Elasticity_Promotions_Data.parquet"
+var DataPath string = "data/Store_Sales_Price_Elasticity_Promotions_Data.parquet"
 
 /*
 -------------
 Aux functions
 -------------
 */
+
 func AssertDataPath(providedPath string) {
 	if strings.HasSuffix(providedPath, ".parquet") {
-		dataPath = providedPath
+		DataPath = providedPath
 	}
 
-	if _, err := os.Stat(dataPath); err != nil {
-		log.Fatalf("No parquet data file found at %s\n", dataPath)
+	if _, err := os.Stat(DataPath); err != nil {
+		log.Fatalf("No parquet data file found at %s\n", DataPath)
 	}
 }
 
@@ -170,8 +171,8 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 	}
 
 	formattedPrompt := fmt.Sprintf(chartConfigPrompt, data, visualizationGoal)
-	span := traceTools.StartOpenInferenceSpan("ExtractChart", traceTools.ChainKind)
-	defer span.End()
+	_, span := traceTools.StartOpenInferenceSpan("ExtractChart", traceTools.ChainKind, traceTools.LastToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
@@ -226,8 +227,8 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 // Second part of the visualization tool. Generate code from chart
 func createChart(config visualizationConfigData) string {
 	formattedPrompt := fmt.Sprintf(createChartPrompt, config)
-	span := traceTools.StartOpenInferenceSpan("CreateChart", traceTools.ChainKind)
-	defer span.End()
+	_, span := traceTools.StartOpenInferenceSpan("CreateChart", traceTools.ChainKind, traceTools.LastToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
@@ -262,8 +263,8 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 		strings.Join(columns, ", "), tableName,
 	)
 
-	span := traceTools.StartOpenInferenceSpan("SqlGeneration", traceTools.ChainKind)
-	defer span.End()
+	_, span := traceTools.StartOpenInferenceSpan("SqlGeneration", traceTools.ChainKind, traceTools.LastToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
@@ -299,8 +300,9 @@ Agent tools
 
 // Tool for sales lookup
 func LookUpSalesData(prompt string) string {
-	span := traceTools.StartOpenInferenceSpan("LookUpTool", traceTools.ToolKind)
-	defer span.End()
+	ctx, span := traceTools.StartOpenInferenceSpan("LookUpTool", traceTools.ToolKind, traceTools.HandleToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
+	traceTools.LastToolContext = ctx
 
 	traceTools.SetSpanInput(span, prompt)
 
@@ -319,7 +321,7 @@ func LookUpSalesData(prompt string) string {
 			CREATE TABLE IF NOT EXISTS %s AS
 			SELECT * FROM read_parquet('%s')`,
 			tableName,
-			dataPath,
+			DataPath,
 		),
 	)
 
@@ -392,8 +394,9 @@ func LookUpSalesData(prompt string) string {
 func AnalyzeSalesData(prompt string, data string) string {
 	formatedPrompt := fmt.Sprintf(dataAnalysisPrompt, data, prompt)
 
-	span := traceTools.StartOpenInferenceSpan("AnalyzeTool", traceTools.ToolKind)
-	defer span.End()
+	ctx, span := traceTools.StartOpenInferenceSpan("AnalyzeTool", traceTools.ToolKind, traceTools.HandleToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
+	traceTools.LastToolContext = ctx
 
 	traceTools.SetSpanInput(span, formatedPrompt)
 
@@ -428,8 +431,9 @@ func AnalyzeSalesData(prompt string, data string) string {
 
 // Tool for data visualization
 func GenerateVisualization(data string, visualizationGoal string) string {
-	span := traceTools.StartOpenInferenceSpan("VisualizationTool", traceTools.ToolKind)
-	defer span.End()
+	ctx, span := traceTools.StartOpenInferenceSpan("VisualizationTool", traceTools.ToolKind, traceTools.HandleToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
+	traceTools.LastToolContext = ctx
 
 	traceTools.SetSpanInput(span, []string{data, visualizationGoal})
 

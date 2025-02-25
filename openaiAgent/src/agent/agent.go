@@ -1,16 +1,13 @@
 package agent
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"os"
-	"strings"
 	"tools"
 	"traceTools"
 
 	"github.com/openai/openai-go"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )
 
@@ -82,8 +79,9 @@ func loadToolsJson() []toolConfig {
 	log.Println("Loading tools json ...")
 	jsonFile, err := os.Open(toolsJsonPath)
 	if err != nil {
-		log.Fatalln(err)
+		log.Panicln(err)
 	}
+	defer jsonFile.Close()
 
 	config := []toolConfig{}
 	json.NewDecoder(jsonFile).Decode(&config)
@@ -96,8 +94,9 @@ func handleToolCalls(
 	messages []openai.ChatCompletionMessageParamUnion,
 ) []openai.ChatCompletionMessageParamUnion {
 	// Start Span
-	span := traceTools.StartOpenInferenceSpan("handleToolCalls", traceTools.ChainKind)
-	defer span.End()
+	ctx, span := traceTools.StartOpenInferenceSpan("handleToolCalls", traceTools.ChainKind, traceTools.LastRouterContext)
+	defer traceTools.EndOpenInferenceSpan(span)
+	traceTools.HandleToolContext = ctx
 
 	// Track input and output for span
 	inputAttr := []string{}
@@ -114,7 +113,7 @@ func handleToolCalls(
 		err := json.Unmarshal([]byte(toolCall.Function.Arguments), &functionArgs)
 		if err != nil {
 			traceTools.SetSpanErrorCode(span)
-			log.Fatal(err)
+			log.Panic(err)
 		}
 
 		result := ""
@@ -127,7 +126,7 @@ func handleToolCalls(
 			result = tools.GenerateVisualization(functionArgs.Data, functionArgs.VisualizationGoal)
 		default:
 			span.SetStatus(codes.Error, "There was an issue unwraping function names")
-			log.Fatal("Invalid function name")
+			log.Panic("Invalid function name")
 		}
 
 		response := openai.ToolMessage(toolCall.ID, result)
@@ -136,13 +135,6 @@ func handleToolCalls(
 		// Update output attribute
 		outputAttr = append(outputAttr, response.Content.String())
 	}
-
-	// Set input, output and model for tracking in span.
-	span.SetAttributes(
-		attribute.String("ai.model", tools.Model),
-		attribute.String("ai.input", "["+strings.Join(inputAttr, ",\n")+"["),
-		attribute.String("ai.output", strings.Join(outputAttr, "\n")),
-	)
 
 	traceTools.SetSpanInput(span, inputAttr)
 	traceTools.SetSpanOutput(span, outputAttr)
@@ -165,7 +157,7 @@ func formatAgentMessages[T AgentInput](messages T) []openai.ChatCompletionMessag
 	case []openai.ChatCompletionMessageParamUnion:
 		openaiMessages = value
 	default:
-		log.Fatal("messages are not on expected types")
+		log.Panic("messages are not on expected types")
 	}
 
 	// Add a system message if none present
@@ -221,7 +213,7 @@ func convertToolConfigToParams(toolConfigs []toolConfig) []openai.ChatCompletion
 				},
 			}
 		default:
-			log.Fatal("Unexpected function name")
+			log.Panic("Unexpected function name")
 		}
 
 		// Add each config as a param
@@ -248,20 +240,21 @@ Main Agent function
 -------------------
 */
 
-func RunAgent[T AgentInput](messages T) string {
+func RunAgent[T AgentInput](messages T) (string, error) {
 	openaiMessages := formatAgentMessages(messages)
 	openaiToolParams := convertToolConfigToParams(loadToolsJson())
 
 	for {
 		log.Println("Making router call for OpenAI and starting new span")
-		span := traceTools.StartOpenInferenceSpan("RouterCall", traceTools.ChainKind)
+		ctx, span := traceTools.StartOpenInferenceSpan("RouterCall", traceTools.ChainKind, traceTools.AgentContext)
+		traceTools.LastRouterContext = ctx
 
 		inputMessage := openai.F(openaiMessages[len(openaiMessages)-1]).String()
 		traceTools.SetSpanInput(span, inputMessage)
 		traceTools.SetSpanModel(span, tools.Model)
 
 		response, err := tools.GetOpenaiClient().Chat.Completions.New(
-			context.TODO(),
+			ctx,
 			openai.ChatCompletionNewParams{
 				Model:     openai.F(tools.Model),
 				Messages:  openai.F(openaiMessages),
@@ -272,8 +265,8 @@ func RunAgent[T AgentInput](messages T) string {
 
 		if err != nil {
 			traceTools.SetSpanErrorCode(span)
-			span.End()
-			log.Fatalln(err)
+			traceTools.EndOpenInferenceSpan(span)
+			return "", err
 		}
 
 		// Add the response to a tool call message, needed for next steps
@@ -296,7 +289,8 @@ func RunAgent[T AgentInput](messages T) string {
 		} else {
 			log.Println("No tool calls, returning final answer")
 			traceTools.SetSpanOutput(span, responseMessage.Content)
-			return response.Choices[0].Message.Content
+			traceTools.EndOpenInferenceSpan(span)
+			return response.Choices[0].Message.Content, nil
 		}
 	}
 }

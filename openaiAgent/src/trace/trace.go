@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -44,6 +45,11 @@ const openInferenceOutputKey = "output.value"
 
 var tracerProvider *traceSdk.TracerProvider
 var activeTracer trace.Tracer = nil
+
+var AgentContext context.Context = nil
+var LastRouterContext context.Context = nil
+var HandleToolContext context.Context = nil
+var LastToolContext context.Context = nil
 
 // Get or initialize tracer provider
 func GetTracerProvider() *traceSdk.TracerProvider {
@@ -108,9 +114,17 @@ func GetActiveTracer() trace.Tracer {
 }
 
 // Start a new Span
-func StartOpenInferenceSpan(spanName string, openInferenceSpanKind OpenInferenceSpanKind) trace.Span {
-	_, span := GetActiveTracer().Start(
-		context.Background(),
+func StartOpenInferenceSpan(
+	spanName string,
+	openInferenceSpanKind OpenInferenceSpanKind,
+	parentSpanContext context.Context,
+) (context.Context, trace.Span) {
+	if parentSpanContext == nil {
+		parentSpanContext = context.WithoutCancel(context.Background())
+	}
+
+	ctx, span := GetActiveTracer().Start(
+		parentSpanContext,
 		spanName,
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(
@@ -118,7 +132,25 @@ func StartOpenInferenceSpan(spanName string, openInferenceSpanKind OpenInference
 		),
 	)
 
-	return span
+	spanId := span.SpanContext().SpanID().String()
+	traceId := span.SpanContext().TraceID()
+	log.Printf(
+		"Starting '%s' OpenInference Span with kind '%s' and ID '%s'. TraceID = %s.\n",
+		spanName,
+		openInferenceSpanKind,
+		spanId,
+		traceId,
+	)
+	return ctx, span
+}
+
+// End a Span
+func EndOpenInferenceSpan(span trace.Span) {
+	log.Printf("Ending OpenInference with ID: %s\n", span.SpanContext().SpanID().String())
+	span.End(
+		trace.WithStackTrace(true),
+		trace.WithTimestamp(time.Now()),
+	)
 }
 
 func SetSpanAttr[T SpanDataType](span trace.Span, key string, input T) {
