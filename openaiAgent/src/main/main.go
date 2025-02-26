@@ -10,20 +10,25 @@ import (
 	"traceTools"
 )
 
-const ProjectPath = "../.."
+var ProjectPath = "../.."
 
+/*
+Start the main span surrounding the agent run.
+Receives the user prompt as `prompt`.
+*/
 func startMainSpan(prompt string) (string, error) {
-	// Create a new span
+	// Create a new span and set the agent context global var
 	ctx, span := traceTools.StartOpenInferenceSpan("AgentRun", traceTools.AgentKind, nil)
 	traceTools.AgentContext = ctx
-
 	defer traceTools.EndOpenInferenceSpan(span)
 
+	// Set span attributes
 	traceTools.SetSpanInput(span, prompt)
 	traceTools.SetSpanModel(span, tools.Model)
 
 	result, err := agent.RunAgent(prompt)
 
+	// Set span output and status code
 	traceTools.SetSpanOutput(span, result)
 	if err != nil {
 		traceTools.SetSpanErrorCode(span)
@@ -38,7 +43,10 @@ func main() {
 		log.Fatalf("Usage: %s [prompt]\n", os.Args[0])
 	}
 
+	ProjectPath = path.Join(path.Dir(os.Args[0]), ProjectPath)
+
 	tools.AssertDataPath(path.Join(ProjectPath, tools.DataPath))
+	tools.AssertToolsPath(path.Join(ProjectPath, tools.ToolsJsonPath))
 
 	result, err := startMainSpan(os.Args[1])
 	shutdowunErr := traceTools.GetTracerProvider().Shutdown(context.Background())

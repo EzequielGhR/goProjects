@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -75,6 +74,7 @@ Global definitions
 var openaiClient *openai.Client = nil
 var visualConfigSchema = generateSchema[visualizationConfig]()
 var DataPath string = "data/Store_Sales_Price_Elasticity_Promotions_Data.parquet"
+var ToolsJsonPath string = "data/tools.json"
 
 /*
 -------------
@@ -82,6 +82,7 @@ Aux functions
 -------------
 */
 
+// Panic if Data doesn't exist at provided path. Redefine global var otherwise
 func AssertDataPath(providedPath string) {
 	if strings.HasSuffix(providedPath, ".parquet") {
 		DataPath = providedPath
@@ -89,6 +90,17 @@ func AssertDataPath(providedPath string) {
 
 	if _, err := os.Stat(DataPath); err != nil {
 		log.Panicf("No parquet data file found at %s\n", DataPath)
+	}
+}
+
+// Panic if Json doesn't exist at provided path. Redefine global var otherwise
+func AssertToolsPath(providedPath string) {
+	if strings.HasSuffix(providedPath, ".json") {
+		ToolsJsonPath = providedPath
+	}
+
+	if _, err := os.Stat(ToolsJsonPath); err != nil {
+		log.Panicf("No json file found at %s\n", ToolsJsonPath)
 	}
 }
 
@@ -171,14 +183,17 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 	}
 
 	formattedPrompt := fmt.Sprintf(chartConfigPrompt, data, visualizationGoal)
-	_, span := traceTools.StartOpenInferenceSpan("ExtractChart", traceTools.ChainKind, traceTools.LastToolContext)
+
+	// Initialize span as subspan of the latest tool span. This is the lowest level chain so only track context locally
+	ctx, span := traceTools.StartOpenInferenceSpan("ExtractChart", traceTools.ChainKind, traceTools.LastToolContext)
 	defer traceTools.EndOpenInferenceSpan(span)
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
 	// Use structure outputs to get the chart config as expected
+	// For this use ResponseFormat Param with the desired json schema
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		context.TODO(),
+		ctx,
 		openai.ChatCompletionNewParams{
 			Model: openai.F(Model),
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
@@ -227,13 +242,14 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 // Second part of the visualization tool. Generate code from chart
 func createChart(config visualizationConfigData) string {
 	formattedPrompt := fmt.Sprintf(createChartPrompt, config)
-	_, span := traceTools.StartOpenInferenceSpan("CreateChart", traceTools.ChainKind, traceTools.LastToolContext)
+	// Initialize span as subspan of the latest tool span. This is the lowest level chain so only track context locally
+	ctx, span := traceTools.StartOpenInferenceSpan("CreateChart", traceTools.ChainKind, traceTools.LastToolContext)
 	defer traceTools.EndOpenInferenceSpan(span)
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		context.TODO(),
+		ctx,
 		openai.ChatCompletionNewParams{
 			Model: openai.F(Model),
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
@@ -263,13 +279,14 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 		strings.Join(columns, ", "), tableName,
 	)
 
-	_, span := traceTools.StartOpenInferenceSpan("SqlGeneration", traceTools.ChainKind, traceTools.LastToolContext)
+	// Initialize span as subspan of the latest tool span. This is the lowest level chain so only track context locally
+	ctx, span := traceTools.StartOpenInferenceSpan("SqlGeneration", traceTools.ChainKind, traceTools.LastToolContext)
 	defer traceTools.EndOpenInferenceSpan(span)
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		context.TODO(),
+		ctx,
 		openai.ChatCompletionNewParams{
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
 				openai.UserMessage(formattedPrompt),
@@ -300,6 +317,7 @@ Agent tools
 
 // Tool for sales lookup
 func LookUpSalesData(prompt string) string {
+	// Start span as sub span of the handleToolCalls span and update the latest tool context global variable
 	ctx, span := traceTools.StartOpenInferenceSpan("LookUpTool", traceTools.ToolKind, traceTools.HandleToolContext)
 	defer traceTools.EndOpenInferenceSpan(span)
 	traceTools.LastToolContext = ctx
@@ -394,6 +412,7 @@ func LookUpSalesData(prompt string) string {
 func AnalyzeSalesData(prompt string, data string) string {
 	formatedPrompt := fmt.Sprintf(dataAnalysisPrompt, data, prompt)
 
+	// Start span as sub span of the handleToolCalls span and update the latest tool context global variable
 	ctx, span := traceTools.StartOpenInferenceSpan("AnalyzeTool", traceTools.ToolKind, traceTools.HandleToolContext)
 	defer traceTools.EndOpenInferenceSpan(span)
 	traceTools.LastToolContext = ctx
@@ -401,7 +420,7 @@ func AnalyzeSalesData(prompt string, data string) string {
 	traceTools.SetSpanInput(span, formatedPrompt)
 
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		context.TODO(),
+		ctx,
 		openai.ChatCompletionNewParams{
 			Model: openai.F(Model),
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
@@ -431,6 +450,7 @@ func AnalyzeSalesData(prompt string, data string) string {
 
 // Tool for data visualization
 func GenerateVisualization(data string, visualizationGoal string) string {
+	// Start span as sub span of the handleToolCalls span and update the latest tool context global variable
 	ctx, span := traceTools.StartOpenInferenceSpan("VisualizationTool", traceTools.ToolKind, traceTools.HandleToolContext)
 	defer traceTools.EndOpenInferenceSpan(span)
 	traceTools.LastToolContext = ctx

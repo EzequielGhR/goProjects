@@ -18,16 +18,15 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-type SpanDataType interface {
+// Interface to use when setting attributes on spans
+type SpanAttributeDataType interface {
 	string | []string | int | bool
 }
 
-type OpenInferenceCtxKey string
-
-const key OpenInferenceCtxKey = "key"
-
+// Span kind datatype for replicated openinference spans
 type OpenInferenceSpanKind string
 
+// Replication of openinference span kinds
 const (
 	AgentKind     OpenInferenceSpanKind = "agent"
 	ChainKind     OpenInferenceSpanKind = "chain"
@@ -41,15 +40,19 @@ const (
 	UnknownKind   OpenInferenceSpanKind = "unknown"
 )
 
+// Constants for replication of openinference traces
+// Used to display traces and spans properly on phoenix
 const projectName = "Zeke-Go-OpenAI-Agent"
 const openInferenceProjectNameKey = "openinference.project.name"
 const openInferenceSpanKindKey = "openinference.span.kind"
 const openInferenceInputKey = "input.value"
 const openInferenceOutputKey = "output.value"
 
+// Global private vars for tracer provider and tracer
 var tracerProvider *traceSdk.TracerProvider
 var activeTracer trace.Tracer = nil
 
+// Global variables for span context tracking accross modules
 var AgentContext context.Context = nil
 var LastRouterContext context.Context = nil
 var HandleToolContext context.Context = nil
@@ -98,7 +101,7 @@ func GetTracerProvider() *traceSdk.TracerProvider {
 		)),
 	)
 
-	log.Println("Register tracer provider")
+	log.Println("Registering tracer provider")
 
 	// Register the tracer globally
 	otel.SetTracerProvider(tracerProvider)
@@ -117,7 +120,8 @@ func GetActiveTracer() trace.Tracer {
 	return activeTracer
 }
 
-// Start a new Span
+// Start a new Span configured similarly to openinference spans
+// Used to displaying correctly on phoenix
 func StartOpenInferenceSpan(
 	spanName string,
 	openInferenceSpanKind OpenInferenceSpanKind,
@@ -140,7 +144,7 @@ func StartOpenInferenceSpan(
 	return ctx, span
 }
 
-// End a Span
+// End an openinference replicated span
 func EndOpenInferenceSpan(span trace.Span) {
 	log.Printf("Ending OpenInference Span with: ID: %s\n", span.SpanContext().SpanID().String())
 	span.End(
@@ -149,7 +153,13 @@ func EndOpenInferenceSpan(span trace.Span) {
 	)
 }
 
-func SetSpanAttr[T SpanDataType](span trace.Span, key string, input T) {
+/*
+-----------------------------------------
+Functions for setting attributes on spans
+-----------------------------------------
+*/
+
+func SetSpanAttr[T SpanAttributeDataType](span trace.Span, key string, input T) {
 	var attr attribute.KeyValue
 	switch any(input).(type) {
 	case string:
@@ -163,11 +173,11 @@ func SetSpanAttr[T SpanDataType](span trace.Span, key string, input T) {
 	span.SetAttributes(attr)
 }
 
-func SetSpanInput[T SpanDataType](span trace.Span, input T) {
+func SetSpanInput[T SpanAttributeDataType](span trace.Span, input T) {
 	SetSpanAttr(span, openInferenceInputKey, input)
 }
 
-func SetSpanOutput[T SpanDataType](span trace.Span, output T) {
+func SetSpanOutput[T SpanAttributeDataType](span trace.Span, output T) {
 	SetSpanAttr(span, openInferenceOutputKey, output)
 }
 
@@ -175,11 +185,17 @@ func SetSpanModel(span trace.Span, model string) {
 	SetSpanAttr(span, "model", model)
 }
 
-func SetSpanAttrFromMap[T SpanDataType](span trace.Span, kvMap map[string]T) {
+func SetSpanAttrFromMap[T SpanAttributeDataType](span trace.Span, kvMap map[string]T) {
 	for k, v := range kvMap {
 		SetSpanAttr(span, k, v)
 	}
 }
+
+/*
+---------------
+set span status
+---------------
+*/
 
 func SetSpanGenericStatus(span trace.Span, statusCode codes.Code, message string) {
 	span.SetStatus(statusCode, fmt.Sprintf(

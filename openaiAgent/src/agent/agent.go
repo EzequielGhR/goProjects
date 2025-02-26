@@ -8,7 +8,6 @@ import (
 	"traceTools"
 
 	"github.com/openai/openai-go"
-	"go.opentelemetry.io/otel/codes"
 )
 
 /*
@@ -56,6 +55,7 @@ type toolFunctionArgs struct {
 	VisualizationGoal string `json:"visualizationGoal"`
 }
 
+// Agent input interface
 type AgentInput interface {
 	string | []openai.ChatCompletionMessageParamUnion
 }
@@ -66,7 +66,6 @@ Constants
 ---------
 */
 
-const toolsJsonPath = "/home/zeke/Documents/Repos/goProjects/openaiAgent/src/tools/tools.json"
 const systemPrompt = "You are a helpful assistant that can answer questions about the Store Sales Price Elasticity Promotions dataset."
 
 /*
@@ -75,9 +74,10 @@ Aux functions
 -------------
 */
 
+// Load tools config from a json file
 func loadToolsJson() []toolConfig {
 	log.Println("Loading tools json ...")
-	jsonFile, err := os.Open(toolsJsonPath)
+	jsonFile, err := os.Open(tools.ToolsJsonPath)
 	if err != nil {
 		log.Panicln(err)
 	}
@@ -88,17 +88,18 @@ func loadToolsJson() []toolConfig {
 	return config
 }
 
-// Handle the different tool calls and append result messages to ongoing conversation
+// Handle the different tool calls and append result messages to ongoing conversation.
+// Receives an array of tool calls and an array of current conversation messages.
 func handleToolCalls(
 	toolCalls []openai.ChatCompletionMessageToolCall,
 	messages []openai.ChatCompletionMessageParamUnion,
 ) []openai.ChatCompletionMessageParamUnion {
-	// Start Span
-	ctx, span := traceTools.StartOpenInferenceSpan("handleToolCalls", traceTools.ChainKind, traceTools.LastRouterContext)
+	// Start Span as sub span of the last router call's. Set the global variable for the handleToolCalls span context
+	ctx, span := traceTools.StartOpenInferenceSpan("HandleToolCalls", traceTools.ChainKind, traceTools.LastRouterContext)
 	defer traceTools.EndOpenInferenceSpan(span)
 	traceTools.HandleToolContext = ctx
 
-	// Track input and output for span
+	// Track input and output for span's attribute set up
 	inputAttr := []string{}
 	outputAttr := []string{}
 	for _, toolCall := range toolCalls {
@@ -125,7 +126,7 @@ func handleToolCalls(
 		case tools.VisualizeFuncName:
 			result = tools.GenerateVisualization(functionArgs.Data, functionArgs.VisualizationGoal)
 		default:
-			span.SetStatus(codes.Error, "There was an issue unwraping function names")
+			traceTools.SetSpanErrorCode(span)
 			log.Panic("Invalid function name")
 		}
 
@@ -145,7 +146,8 @@ func handleToolCalls(
 	return messages
 }
 
-// Correctly format messages for agent handling
+// Correctly format messages for agent handling. Expects a type of AgentInput which can be
+// a string or an array of ChatcompletionMessageParamUnion
 func formatAgentMessages[T AgentInput](messages T) []openai.ChatCompletionMessageParamUnion {
 	var openaiMessages []openai.ChatCompletionMessageParamUnion
 
@@ -186,16 +188,16 @@ func convertToolConfigToParams(toolConfigs []toolConfig) []openai.ChatCompletion
 		log.Printf("Converting tool config for function '%s' to param\n", config.Function.Name)
 
 		// Each config has its own properties, map them using the function name
-		var propertiesMap map[string]interface{}
+		var propertiesMap map[string]any
 		switch config.Function.Name {
 		case tools.LookUpFuncName:
-			propertiesMap = map[string]interface{}{
+			propertiesMap = map[string]any{
 				"prompt": map[string]string{
 					"type": config.Function.Parameters.Properties.Prompt.Type,
 				},
 			}
 		case tools.AnalyzeFuncName:
-			propertiesMap = map[string]interface{}{
+			propertiesMap = map[string]any{
 				"prompt": map[string]string{
 					"type": config.Function.Parameters.Properties.Prompt.Type,
 				},
@@ -204,7 +206,7 @@ func convertToolConfigToParams(toolConfigs []toolConfig) []openai.ChatCompletion
 				},
 			}
 		case tools.VisualizeFuncName:
-			propertiesMap = map[string]interface{}{
+			propertiesMap = map[string]any{
 				"data": map[string]string{
 					"type": config.Function.Parameters.Properties.Data.Type,
 				},
@@ -246,9 +248,11 @@ func RunAgent[T AgentInput](messages T) (string, error) {
 
 	for {
 		log.Println("Making router call for OpenAI and starting new span")
+
+		// Manually start span and set the las router call context global var
+		// The span starts with the Agent span's context to work as child span
 		ctx, span := traceTools.StartOpenInferenceSpan("RouterCall", traceTools.ChainKind, traceTools.AgentContext)
 		defer traceTools.EndOpenInferenceSpan(span)
-
 		traceTools.LastRouterContext = ctx
 
 		inputMessage := openai.F(openaiMessages[len(openaiMessages)-1]).String()
