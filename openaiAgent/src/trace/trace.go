@@ -22,6 +22,10 @@ type SpanDataType interface {
 	string | []string | int | bool
 }
 
+type OpenInferenceCtxKey string
+
+const key OpenInferenceCtxKey = "key"
+
 type OpenInferenceSpanKind string
 
 const (
@@ -82,7 +86,7 @@ func GetTracerProvider() *traceSdk.TracerProvider {
 	)
 
 	if err != nil {
-		log.Fatalf("Failed to initialize exporter: %s\n", err)
+		log.Panicf("Failed to initialize exporter: %s\n", err)
 	}
 
 	// Create a new tracer provider
@@ -120,7 +124,7 @@ func StartOpenInferenceSpan(
 	parentSpanContext context.Context,
 ) (context.Context, trace.Span) {
 	if parentSpanContext == nil {
-		parentSpanContext = context.WithoutCancel(context.Background())
+		parentSpanContext = context.Background()
 	}
 
 	ctx, span := GetActiveTracer().Start(
@@ -132,21 +136,13 @@ func StartOpenInferenceSpan(
 		),
 	)
 
-	spanId := span.SpanContext().SpanID().String()
-	traceId := span.SpanContext().TraceID()
-	log.Printf(
-		"Starting '%s' OpenInference Span with kind '%s' and ID '%s'. TraceID = %s.\n",
-		spanName,
-		openInferenceSpanKind,
-		spanId,
-		traceId,
-	)
+	log.Printf("Starting '%s' OpenInference Span with kind '%s'\n", spanName, openInferenceSpanKind)
 	return ctx, span
 }
 
 // End a Span
 func EndOpenInferenceSpan(span trace.Span) {
-	log.Printf("Ending OpenInference with ID: %s\n", span.SpanContext().SpanID().String())
+	log.Printf("Ending OpenInference Span with: ID: %s\n", span.SpanContext().SpanID().String())
 	span.End(
 		trace.WithStackTrace(true),
 		trace.WithTimestamp(time.Now()),
@@ -185,14 +181,18 @@ func SetSpanAttrFromMap[T SpanDataType](span trace.Span, kvMap map[string]T) {
 	}
 }
 
-func SetSpanGenericStatus(span trace.Span, statusCode codes.Code) {
-	span.SetStatus(statusCode, fmt.Sprintf("%s Successful", span.SpanContext().SpanID().String()))
+func SetSpanGenericStatus(span trace.Span, statusCode codes.Code, message string) {
+	span.SetStatus(statusCode, fmt.Sprintf(
+		"Span ID: '%s'. Status: %s",
+		span.SpanContext().SpanID().String(),
+		message,
+	))
 }
 
 func SetSpanSuccessCode(span trace.Span) {
-	SetSpanGenericStatus(span, codes.Ok)
+	SetSpanGenericStatus(span, codes.Ok, "Successful")
 }
 
 func SetSpanErrorCode(span trace.Span) {
-	SetSpanGenericStatus(span, codes.Error)
+	SetSpanGenericStatus(span, codes.Error, "Failed")
 }

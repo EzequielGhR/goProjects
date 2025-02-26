@@ -41,10 +41,13 @@ func main() {
 	tools.AssertDataPath(path.Join(ProjectPath, tools.DataPath))
 
 	result, err := startMainSpan(os.Args[1])
-	defer traceTools.GetTracerProvider().Shutdown(context.Background())
+	shutdowunErr := traceTools.GetTracerProvider().Shutdown(context.Background())
+	if shutdowunErr != nil {
+		log.Panicf("ERROR: %s\n", shutdowunErr)
+	}
 
 	if err != nil {
-		log.Fatalf("ERROR: %s\n", err)
+		log.Panicf("ERROR: %s\n", err)
 	}
 
 	log.Println(result)

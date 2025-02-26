@@ -247,6 +247,8 @@ func RunAgent[T AgentInput](messages T) (string, error) {
 	for {
 		log.Println("Making router call for OpenAI and starting new span")
 		ctx, span := traceTools.StartOpenInferenceSpan("RouterCall", traceTools.ChainKind, traceTools.AgentContext)
+		defer traceTools.EndOpenInferenceSpan(span)
+
 		traceTools.LastRouterContext = ctx
 
 		inputMessage := openai.F(openaiMessages[len(openaiMessages)-1]).String()
@@ -265,7 +267,6 @@ func RunAgent[T AgentInput](messages T) (string, error) {
 
 		if err != nil {
 			traceTools.SetSpanErrorCode(span)
-			traceTools.EndOpenInferenceSpan(span)
 			return "", err
 		}
 
@@ -289,7 +290,6 @@ func RunAgent[T AgentInput](messages T) (string, error) {
 		} else {
 			log.Println("No tool calls, returning final answer")
 			traceTools.SetSpanOutput(span, responseMessage.Content)
-			traceTools.EndOpenInferenceSpan(span)
 			return response.Choices[0].Message.Content, nil
 		}
 	}

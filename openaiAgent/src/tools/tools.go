@@ -88,7 +88,7 @@ func AssertDataPath(providedPath string) {
 	}
 
 	if _, err := os.Stat(DataPath); err != nil {
-		log.Fatalf("No parquet data file found at %s\n", DataPath)
+		log.Panicf("No parquet data file found at %s\n", DataPath)
 	}
 }
 
