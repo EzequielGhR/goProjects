@@ -24,7 +24,6 @@ func startMainSpan(prompt string) (string, error) {
 
 	// Set span attributes
 	traceTools.SetSpanInput(span, prompt)
-	traceTools.SetSpanModel(span, tools.Model)
 
 	result, err := agent.RunAgent(prompt)
 

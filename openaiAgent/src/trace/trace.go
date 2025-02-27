@@ -153,6 +153,28 @@ func EndOpenInferenceSpan(span trace.Span) {
 	)
 }
 
+func StartOpenAISpan(parentSpanContext context.Context, openaiModel string) (context.Context, trace.Span) {
+	if parentSpanContext == nil {
+		parentSpanContext = context.Background()
+	}
+
+	ctx, span := GetActiveTracer().Start(
+		parentSpanContext,
+		"ChatCompletion",
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(
+			attribute.String(openInferenceSpanKindKey, strings.ToUpper(string(LLMKind))),
+			attribute.String("llm.provider", "openai"),
+			attribute.String("llm.invocation_parameters", fmt.Sprintf("{\"model\": \"%s\"}", openaiModel)),
+			attribute.String("llm.system", "openai"),
+			attribute.String("llm.model_name", openaiModel),
+		),
+	)
+
+	log.Println("Starting openai chat completion LLM span")
+	return ctx, span
+}
+
 /*
 -----------------------------------------
 Functions for setting attributes on spans
@@ -161,13 +183,15 @@ Functions for setting attributes on spans
 
 func SetSpanAttr[T SpanAttributeDataType](span trace.Span, key string, input T) {
 	var attr attribute.KeyValue
-	switch any(input).(type) {
+	switch r := any(input).(type) {
 	case string:
-		attr = attribute.String(key, any(input).(string))
+		attr = attribute.String(key, r)
 	case []string:
-		attr = attribute.StringSlice(key, any(input).([]string))
+		attr = attribute.StringSlice(key, r)
 	case bool:
-		attr = attribute.Bool(key, any(input).(bool))
+		attr = attribute.Bool(key, r)
+	case int:
+		attr = attribute.Int(key, r)
 	}
 
 	span.SetAttributes(attr)
@@ -182,12 +206,24 @@ func SetSpanOutput[T SpanAttributeDataType](span trace.Span, output T) {
 }
 
 func SetSpanModel(span trace.Span, model string) {
-	SetSpanAttr(span, "model", model)
+	SetSpanAttr(span, "llm.model_name", model)
 }
 
-func SetSpanAttrFromMap[T SpanAttributeDataType](span trace.Span, kvMap map[string]T) {
+func SetSpanAttrFromMap(span trace.Span, kvMap map[string]any) {
 	for k, v := range kvMap {
-		SetSpanAttr(span, k, v)
+		switch r := v.(type) {
+		case string:
+			SetSpanAttr(span, k, r)
+		case int:
+			SetSpanAttr(span, k, r)
+		case []string:
+			SetSpanAttr(span, k, r)
+		case bool:
+			SetSpanAttr(span, k, r)
+		default:
+			log.Printf("Value for key '%s' is not an expected type. Ignoring\n", k)
+			continue
+		}
 	}
 }
 
