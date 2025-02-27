@@ -190,41 +190,64 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
+	llmCtx, llmSpan := traceTools.StartOpenAISpan(ctx, Model)
+	defer llmSpan.End()
+
+	inputMessage := openai.F([]openai.ChatCompletionMessageParamUnion{
+		openai.UserMessage(formattedPrompt),
+	})
+
+	responseFormat := openai.F[openai.ChatCompletionNewParamsResponseFormatUnion](
+		openai.ResponseFormatJSONSchemaParam{
+			Type: openai.F(openai.ResponseFormatJSONSchemaTypeJSONSchema),
+			JSONSchema: openai.F(openai.ResponseFormatJSONSchemaJSONSchemaParam{
+				Name:        openai.F("chartConfiguration"),
+				Description: openai.F("A simple configuration for a chart"),
+				Schema:      openai.F(visualConfigSchema),
+				Strict:      openai.Bool(true),
+			}),
+		},
+	)
+
+	traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
+		"llm.input_messages":  []string{inputMessage.String()},
+		"llm.response_format": responseFormat.String(),
+	})
+
 	// Use structure outputs to get the chart config as expected
 	// For this use ResponseFormat Param with the desired json schema
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		ctx,
+		llmCtx,
 		openai.ChatCompletionNewParams{
-			Model: openai.F(Model),
-			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-				openai.UserMessage(formattedPrompt),
-			}),
-			ResponseFormat: openai.F[openai.ChatCompletionNewParamsResponseFormatUnion](
-				openai.ResponseFormatJSONSchemaParam{
-					Type: openai.F(openai.ResponseFormatJSONSchemaTypeJSONSchema),
-					JSONSchema: openai.F(openai.ResponseFormatJSONSchemaJSONSchemaParam{
-						Name:        openai.F("chartConfiguration"),
-						Description: openai.F("A simple configuration for a chart"),
-						Schema:      openai.F(visualConfigSchema),
-						Strict:      openai.Bool(true),
-					}),
-				},
-			),
+			Model:          openai.F(Model),
+			Messages:       inputMessage,
+			ResponseFormat: responseFormat,
 		},
 	)
 
 	if err != nil {
+		traceTools.SetSpanErrorCode(llmSpan)
 		traceTools.SetSpanErrorCode(span)
 		log.Printf("WARNING: %s\n", err)
 		return returnValue
 	}
 
-	jsonData := cleanLlmBlockResponse(response.Choices[0].Message.Content)
+	responseMessage := response.Choices[0].Message
+	jsonData := cleanLlmBlockResponse(responseMessage.Content)
+
+	traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
+		"llm.token_count.prompt":     int(response.Usage.PromptTokens),
+		"llm.token_count.completion": int(response.Usage.CompletionTokens),
+		"llm.token_count.total":      int(response.Usage.TotalTokens),
+		"llm.output_messages":        []string{openai.F(responseMessage).String()},
+		"llm.tools":                  []string{},
+	})
 
 	// Convert response to json
 	vconf := visualizationConfig{}
 	err = json.Unmarshal([]byte(jsonData), &vconf)
 	if err != nil {
+		traceTools.SetSpanErrorCode(llmSpan)
 		traceTools.SetSpanErrorCode(span)
 		log.Printf("WARNING: %s\n", err)
 		return returnValue
@@ -232,9 +255,9 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 
 	returnValue.Config = vconf
 
+	traceTools.SetSpanSuccessCode(llmSpan)
 	traceTools.SetSpanSuccessCode(span)
 	traceTools.SetSpanOutput(span, jsonData)
-	traceTools.SetSpanModel(span, Model)
 
 	return returnValue
 }
@@ -248,23 +271,41 @@ func createChart(config visualizationConfigData) string {
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
+	llmCtx, llmSpan := traceTools.StartOpenAISpan(ctx, Model)
+	defer llmSpan.End()
+
+	inputMessage := openai.F([]openai.ChatCompletionMessageParamUnion{
+		openai.UserMessage(formattedPrompt),
+	})
+
+	traceTools.SetSpanAttr(llmSpan, "llm.input_messages", []string{inputMessage.String()})
+
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		ctx,
+		llmCtx,
 		openai.ChatCompletionNewParams{
-			Model: openai.F(Model),
-			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-				openai.UserMessage(formattedPrompt),
-			}),
+			Model:    openai.F(Model),
+			Messages: inputMessage,
 		},
 	)
 
 	if err != nil {
+		traceTools.SetSpanErrorCode(llmSpan)
 		traceTools.SetSpanErrorCode(span)
 		log.Printf("WARNING: Failed OpenAI interaction: %s\n", err)
 		return ""
 	}
 
-	pythonCode := cleanLlmBlockResponse(response.Choices[0].Message.Content)
+	responseMessage := response.Choices[0].Message
+	traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
+		"llm.token_count.prompt":     int(response.Usage.PromptTokens),
+		"llm.token_count.completion": int(response.Usage.CompletionTokens),
+		"llm.token_count.total":      int(response.Usage.TotalTokens),
+		"llm.output_messages":        []string{openai.F(responseMessage).String()},
+		"llm.tools":                  []string{},
+	})
+	traceTools.SetSpanSuccessCode(llmSpan)
+
+	pythonCode := cleanLlmBlockResponse(responseMessage.Content)
 	traceTools.SetSpanOutput(span, pythonCode)
 	traceTools.SetSpanSuccessCode(span)
 
@@ -285,28 +326,44 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
+	llmCtx, llmSpan := traceTools.StartOpenAISpan(ctx, Model)
+	defer llmSpan.End()
+
+	inputMessage := openai.F([]openai.ChatCompletionMessageParamUnion{
+		openai.UserMessage(formattedPrompt),
+	})
+
+	traceTools.SetSpanAttr(llmSpan, "llm.input_messages", []string{inputMessage.String()})
+
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		ctx,
+		llmCtx,
 		openai.ChatCompletionNewParams{
-			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-				openai.UserMessage(formattedPrompt),
-			}),
-			Model: openai.F(openai.ChatModelGPT4oMini),
+			Messages: inputMessage,
+			Model:    openai.F(openai.ChatModelGPT4oMini),
 		},
 	)
 
 	if err != nil {
+		traceTools.SetSpanErrorCode(llmSpan)
 		traceTools.SetSpanErrorCode(span)
 		log.Printf("WARNING: Failed OpenAI interaction: %s\n", err)
 		return "", err
 	}
 
-	answer := response.Choices[0].Message.Content
-	traceTools.SetSpanOutput(span, answer)
-	traceTools.SetSpanModel(span, Model)
+	answer := response.Choices[0].Message
+
+	traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
+		"llm.token_count.prompt":     int(response.Usage.PromptTokens),
+		"llm.token_count.completion": int(response.Usage.CompletionTokens),
+		"llm.token_count.total":      int(response.Usage.TotalTokens),
+		"llm.output_messages":        []string{openai.F(answer).String()},
+		"llm.tools":                  []string{},
+	})
+	traceTools.SetSpanSuccessCode(llmSpan)
+	traceTools.SetSpanOutput(span, answer.Content)
 	traceTools.SetSpanSuccessCode(span)
 
-	return answer, nil
+	return answer.Content, nil
 }
 
 /*
@@ -418,32 +475,55 @@ func AnalyzeSalesData(prompt string, data string) string {
 	traceTools.LastToolContext = ctx
 
 	traceTools.SetSpanInput(span, formatedPrompt)
+	inputMessage := openai.F([]openai.ChatCompletionMessageParamUnion{
+		openai.UserMessage(formatedPrompt),
+	})
+
+	llmCtx, llmSpan := traceTools.StartOpenAISpan(ctx, Model)
+	defer llmSpan.End()
+
+	traceTools.SetSpanAttr(llmSpan, "llm.input_messages", []string{inputMessage.String()})
 
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		ctx,
+		llmCtx,
 		openai.ChatCompletionNewParams{
-			Model: openai.F(Model),
-			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-				openai.UserMessage(formatedPrompt),
-			}),
+			Model:    openai.F(Model),
+			Messages: inputMessage,
 		},
 	)
 
-	var finalAnalysis string
-	if err != nil {
-		log.Printf("WARNING: There was an issue with the OpenAI interaction: %s\n", err)
-		finalAnalysis = ""
+	finalAnalysis := ""
+	responseMessages := []string{}
+	promptTokens := 0
+	completionTokens := 0
+	totalTokens := 0
+	if err == nil {
+		responseMessage := response.Choices[0].Message
+		finalAnalysis = strings.Trim(responseMessage.Content, "\n ")
+		responseMessages = []string{openai.F(responseMessages).String()}
+		promptTokens = int(response.Usage.PromptTokens)
+		completionTokens = int(response.Usage.CompletionTokens)
+		totalTokens = int(response.Usage.TotalTokens)
 	} else {
-		finalAnalysis = strings.Trim(response.Choices[0].Message.Content, "\n ")
+		log.Printf("WARNING: There was an issue with the OpenAI interaction: %s\n", err)
 	}
 
-	traceTools.SetSpanModel(span, Model)
+	traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
+		"llm.token_count.prompt":     promptTokens,
+		"llm.token_count.completion": completionTokens,
+		"llm.token_count.total":      totalTokens,
+		"llm.output_messages":        responseMessages,
+		"llm.tools":                  []string{},
+	})
+
 	if finalAnalysis == "" {
 		traceTools.SetSpanErrorCode(span)
+		traceTools.SetSpanErrorCode(llmSpan)
 		return "No analysis could be generated"
 	}
 
 	traceTools.SetSpanOutput(span, finalAnalysis)
+	traceTools.SetSpanSuccessCode(llmSpan)
 	traceTools.SetSpanSuccessCode(span)
 	return finalAnalysis
 }
@@ -461,7 +541,6 @@ func GenerateVisualization(data string, visualizationGoal string) string {
 	code := createChart(config)
 
 	traceTools.SetSpanOutput(span, code)
-	traceTools.SetSpanModel(span, Model)
 	traceTools.SetSpanSuccessCode(span)
 
 	return code

@@ -255,12 +255,21 @@ func RunAgent[T AgentInput](messages T) (string, error) {
 		defer traceTools.EndOpenInferenceSpan(span)
 		traceTools.LastRouterContext = ctx
 
-		inputMessage := openai.F(openaiMessages[len(openaiMessages)-1]).String()
+		inputMessages := []string{}
+		for _, msg := range openaiMessages {
+			inputMessages = append(inputMessages, openai.F(msg).String())
+		}
+
+		inputMessage := inputMessages[0]
 		traceTools.SetSpanInput(span, inputMessage)
-		traceTools.SetSpanModel(span, tools.Model)
+
+		llmCtx, llmSpan := traceTools.StartOpenAISpan(ctx, tools.Model)
+		defer llmSpan.End()
+
+		traceTools.SetSpanAttr(llmSpan, "llm.input_messages", inputMessages)
 
 		response, err := tools.GetOpenaiClient().Chat.Completions.New(
-			ctx,
+			llmCtx,
 			openai.ChatCompletionNewParams{
 				Model:     openai.F(tools.Model),
 				Messages:  openai.F(openaiMessages),
@@ -270,6 +279,7 @@ func RunAgent[T AgentInput](messages T) (string, error) {
 		)
 
 		if err != nil {
+			traceTools.SetSpanErrorCode(llmSpan)
 			traceTools.SetSpanErrorCode(span)
 			return "", err
 		}
@@ -284,8 +294,17 @@ func RunAgent[T AgentInput](messages T) (string, error) {
 			rawJsonToolCalls = append(rawJsonToolCalls, toolCall.JSON.RawJSON())
 		}
 
+		traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
+			"llm.token_count.prompt":     int(response.Usage.PromptTokens),
+			"llm.token_count.completion": int(response.Usage.CompletionTokens),
+			"llm.token_count.total":      int(response.Usage.TotalTokens),
+			"llm.output_messages":        []string{openai.F(response.Choices[0].Message).String()},
+			"llm.tools":                  rawJsonToolCalls,
+		})
+
 		// Set span as successful
 		traceTools.SetSpanSuccessCode(span)
+		traceTools.SetSpanSuccessCode(llmSpan)
 
 		if len(toolCalls) != 0 {
 			log.Println("Processing tool calls ...")
