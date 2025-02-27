@@ -4,7 +4,8 @@ Implements chat completion using OpenAI, Tracing with OpenTelemetry, plus some b
 to properly display traces and spans in phoenix.
 
 # BUILD
-Run build.sh and it should compile to bin/v1/main.o
+- You need to have a few phoenix credentials on your environment variables: 'PHOENIX_COLLECTOR_ENDPOINT' and 'PHOENIX_CLIENT_HEADERS', both can be found on your phoenix free account.
+- Run build.sh and it should compile to bin/v1/main.o
 
 # RUN
 Run run.sh with your prompt as positional argument. If it isn't compiled already, it will do it before running.
@@ -43,7 +44,11 @@ The whole chain of calls and spans function as follows:
     └── RouterCalls
         └── ...
 ```
-The context of each span is tracked via global variables and carried over to each child if any
+The context of each span is tracked via global variables and carried over to each child if any.
+You should be able to see the traces on Phoenix, here is an example:
+
+![](trace_details.png)
+
 
 # Important notes:
 
