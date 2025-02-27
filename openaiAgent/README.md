@@ -21,7 +21,6 @@ The whole project structure is divided into 4 modules
 The whole chain of calls and spans function as follows:
 ```
     Agent
-    ├── ChatCompletion
     ├── RouterCalls
     |       ├── ChatCompletion
     │       ├── HandleToolCalls
@@ -40,7 +39,6 @@ The whole chain of calls and spans function as follows:
     │           ├── ToolCall
     │           └── ToolCall
     |               └── StepCall
-    ├── ChatCompletion
     └── RouterCalls
         └── ...
 ```
