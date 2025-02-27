@@ -1,12 +1,13 @@
 package tools
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
+	"traceTools"
 
 	"github.com/invopop/jsonschema"
 	_ "github.com/marcboeker/go-duckdb"
@@ -19,15 +20,15 @@ Important type definitions
 --------------------------
 */
 
-type VisualizationConfig struct {
+type visualizationConfig struct {
 	ChartType string `json:"chartType" jsonschema_description:"Type of chart to generate"`
 	XAxis     string `json:"xAxis" jsonschema_description:"Name of the X Axis column"`
 	YAxis     string `json:"yAxis" jsonschema_description:"Name of the Y Axis column"`
 	Title     string `json:"title" jsonschema_description:"Title of the chart"`
 }
 
-type VisualizationConfigData struct {
-	Config VisualizationConfig
+type visualizationConfigData struct {
+	Config visualizationConfig
 	Data   string
 }
 
@@ -37,7 +38,7 @@ Prompts and other constants
 ---------------------------
 */
 
-const SQL_GENERATION_PROMPT = `
+const sqlGenerationPrompt = `
 Generate an SQL query based on a prompt. Do not reply with anything besides the SQL query.
 The prompt is:
 %s
@@ -45,24 +46,24 @@ The prompt is:
 The available columns are: %s
 The table name is: %s
 `
-const DATA_ANALYSIS_PROMPT = `
+const dataAnalysisPrompt = `
 Analyze the following data: %s
 Your job is to answer the following question: %s
 `
-const CHART_CONFIG_PROMPT = `
+const chartConfigPrompt = `
 Generate a chart configuration based on this data: %s
 The goal is to show: %s
 `
-const CREATE_CHART_PROMPT = `
+const createChartPrompt = `
 Wrtie python code to create a chart based on the following configuration.
 Only return the code, no other text.
 config: %+v
 `
-const DATA_PATH = "/home/zeke/Documents/Repos/goProjects/openaiAgent/data/Store_Sales_Price_Elasticity_Promotions_Data.parquet"
-const MODEL = openai.ChatModelGPT4oMini
-const LOOKUP_FUNC_NAME = "LookUpSalesData"
-const ANALYZE_FUNC_NAME = "AnalyzeSalesData"
-const VISUALIZE_FUNC_NAME = "GenerateVisualization"
+const tableName = "sales"
+const Model = openai.ChatModelGPT4oMini
+const LookUpFuncName = "LookUpSalesData"
+const AnalyzeFuncName = "AnalyzeSalesData"
+const VisualizeFuncName = "GenerateVisualization"
 
 /*
 ------------------
@@ -71,14 +72,37 @@ Global definitions
 */
 
 var openaiClient *openai.Client = nil
-
-var visualConfigSchema = generateSchema[VisualizationConfig]()
+var visualConfigSchema = generateSchema[visualizationConfig]()
+var DataPath string = "data/Store_Sales_Price_Elasticity_Promotions_Data.parquet"
+var ToolsJsonPath string = "data/tools.json"
 
 /*
 -------------
 Aux functions
 -------------
 */
+
+// Panic if Data doesn't exist at provided path. Redefine global var otherwise
+func AssertDataPath(providedPath string) {
+	if strings.HasSuffix(providedPath, ".parquet") {
+		DataPath = providedPath
+	}
+
+	if _, err := os.Stat(DataPath); err != nil {
+		log.Panicf("No parquet data file found at %s\n", DataPath)
+	}
+}
+
+// Panic if Json doesn't exist at provided path. Redefine global var otherwise
+func AssertToolsPath(providedPath string) {
+	if strings.HasSuffix(providedPath, ".json") {
+		ToolsJsonPath = providedPath
+	}
+
+	if _, err := os.Stat(ToolsJsonPath); err != nil {
+		log.Panicf("No json file found at %s\n", ToolsJsonPath)
+	}
+}
 
 // Use the same client for all calls, here and on main logic
 func GetOpenaiClient() *openai.Client {
@@ -91,7 +115,7 @@ func GetOpenaiClient() *openai.Client {
 }
 
 // Necessary for structured outputs
-func generateSchema[T any]() interface{} {
+func generateSchema[T any]() any {
 	reflector := jsonschema.Reflector{
 		AllowAdditionalProperties: false,
 		DoNotReference:            true,
@@ -102,35 +126,42 @@ func generateSchema[T any]() interface{} {
 	return schema
 }
 
+// Clean up code block response from the LLM
+func cleanLlmBlockResponse(llmResponse string) string {
+	for _, t := range []string{"```json", "```sql", "```python"} {
+		llmResponse = strings.ReplaceAll(llmResponse, t, "")
+	}
+
+	return strings.Trim(llmResponse, "`\n ")
+}
+
 // Extract rows as an array of strings
 func extractFromRows(rows *sql.Rows, columnsAmount int) ([]string, error) {
-	// Initialize return value
-	resultData := []string{}
+	// Create two arrays of interfaces with the size being the amount of columns
+	// One will be defined as pointers to the values of the other. That way providing
+	// it to rows.Scan, will alter the other one's values by reference
+	dynamicValues := make([]any, columnsAmount)
+	pointers := make([]any, columnsAmount)
 
-	// Create an array of interfaces with the size being the amount of columns
-	// Each interface will have a string pointer for later populatin with rows.Scan
-	dynamicValues := make([]interface{}, columnsAmount)
 	for i := range dynamicValues {
-		dynamicValues[i] = new(string)
+		pointers[i] = &dynamicValues[i]
 	}
 
 	log.Println("Processing rows to strings")
+	resultData := []string{}
 	for rows.Next() {
-		// Scan row values into previously created string pointers
-		err := rows.Scan(dynamicValues...)
+		// Scan row values into previously created interface pointers
+		err := rows.Scan(pointers...)
 		if err != nil {
 			return []string{}, err
 		}
 
 		rowValues := []string{}
+		// dynamicValues' values were altered by reference, so it now contains the fields
 		for _, value := range dynamicValues {
-			// Type assert to string pointers, derreference and append to row values
-			content, ok := value.(*string)
-			if ok {
-				rowValues = append(rowValues, *content)
-			} else {
-				rowValues = append(rowValues, "")
-			}
+			// TODO: Find better ways to do it. For now just lazy print interface to convert to string
+			content := fmt.Sprintf("%v", value)
+			rowValues = append(rowValues, content)
 		}
 
 		resultData = append(resultData, strings.Join(rowValues, ", "))
@@ -140,9 +171,9 @@ func extractFromRows(rows *sql.Rows, columnsAmount int) ([]string, error) {
 }
 
 // First part of data visualization tool. Extract a chart config to create code for visualization
-func extractChartConfig(data string, visualizationGoal string) VisualizationConfigData {
-	returnValue := VisualizationConfigData{
-		Config: VisualizationConfig{
+func extractChartConfig(data string, visualizationGoal string) visualizationConfigData {
+	returnValue := visualizationConfigData{
+		Config: visualizationConfig{
 			ChartType: "line",
 			XAxis:     "date",
 			YAxis:     "value",
@@ -151,13 +182,20 @@ func extractChartConfig(data string, visualizationGoal string) VisualizationConf
 		Data: data,
 	}
 
-	formattedPrompt := fmt.Sprintf(CHART_CONFIG_PROMPT, data, visualizationGoal)
+	formattedPrompt := fmt.Sprintf(chartConfigPrompt, data, visualizationGoal)
+
+	// Initialize span as subspan of the latest tool span. This is the lowest level chain so only track context locally
+	ctx, span := traceTools.StartOpenInferenceSpan("ExtractChart", traceTools.ChainKind, traceTools.LastToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
+
+	traceTools.SetSpanInput(span, formattedPrompt)
 
 	// Use structure outputs to get the chart config as expected
+	// For this use ResponseFormat Param with the desired json schema
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		context.TODO(),
+		ctx,
 		openai.ChatCompletionNewParams{
-			Model: openai.F(MODEL),
+			Model: openai.F(Model),
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
 				openai.UserMessage(formattedPrompt),
 			}),
@@ -176,33 +214,44 @@ func extractChartConfig(data string, visualizationGoal string) VisualizationConf
 	)
 
 	if err != nil {
+		traceTools.SetSpanErrorCode(span)
 		log.Printf("WARNING: %s\n", err)
 		return returnValue
 	}
 
-	jsonData := strings.Trim(strings.ReplaceAll(response.Choices[0].Message.Content, "```json", ""), "`\n ")
+	jsonData := cleanLlmBlockResponse(response.Choices[0].Message.Content)
 
 	// Convert response to json
-	vconf := VisualizationConfig{}
+	vconf := visualizationConfig{}
 	err = json.Unmarshal([]byte(jsonData), &vconf)
 	if err != nil {
+		traceTools.SetSpanErrorCode(span)
 		log.Printf("WARNING: %s\n", err)
 		return returnValue
 	}
 
 	returnValue.Config = vconf
 
+	traceTools.SetSpanSuccessCode(span)
+	traceTools.SetSpanOutput(span, jsonData)
+	traceTools.SetSpanModel(span, Model)
+
 	return returnValue
 }
 
 // Second part of the visualization tool. Generate code from chart
-func createChart(config VisualizationConfigData) string {
-	formattedPrompt := fmt.Sprintf(CREATE_CHART_PROMPT, config)
+func createChart(config visualizationConfigData) string {
+	formattedPrompt := fmt.Sprintf(createChartPrompt, config)
+	// Initialize span as subspan of the latest tool span. This is the lowest level chain so only track context locally
+	ctx, span := traceTools.StartOpenInferenceSpan("CreateChart", traceTools.ChainKind, traceTools.LastToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
+
+	traceTools.SetSpanInput(span, formattedPrompt)
 
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		context.TODO(),
+		ctx,
 		openai.ChatCompletionNewParams{
-			Model: openai.F(MODEL),
+			Model: openai.F(Model),
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
 				openai.UserMessage(formattedPrompt),
 			}),
@@ -210,23 +259,34 @@ func createChart(config VisualizationConfigData) string {
 	)
 
 	if err != nil {
+		traceTools.SetSpanErrorCode(span)
 		log.Printf("WARNING: Failed OpenAI interaction: %s\n", err)
 		return ""
 	}
 
-	return strings.Trim(strings.ReplaceAll(response.Choices[0].Message.Content, "```python", ""), "`\n ")
+	pythonCode := cleanLlmBlockResponse(response.Choices[0].Message.Content)
+	traceTools.SetSpanOutput(span, pythonCode)
+	traceTools.SetSpanSuccessCode(span)
+
+	return pythonCode
 }
 
 // Create a query from a user prompt
 func generateSqlQuery(prompt string, columns []string, tableName string) (string, error) {
 	formattedPrompt := fmt.Sprintf(
-		SQL_GENERATION_PROMPT,
+		sqlGenerationPrompt,
 		prompt,
 		strings.Join(columns, ", "), tableName,
 	)
 
+	// Initialize span as subspan of the latest tool span. This is the lowest level chain so only track context locally
+	ctx, span := traceTools.StartOpenInferenceSpan("SqlGeneration", traceTools.ChainKind, traceTools.LastToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
+
+	traceTools.SetSpanInput(span, formattedPrompt)
+
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		context.TODO(),
+		ctx,
 		openai.ChatCompletionNewParams{
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
 				openai.UserMessage(formattedPrompt),
@@ -236,11 +296,17 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 	)
 
 	if err != nil {
+		traceTools.SetSpanErrorCode(span)
 		log.Printf("WARNING: Failed OpenAI interaction: %s\n", err)
 		return "", err
 	}
 
-	return response.Choices[0].Message.Content, nil
+	answer := response.Choices[0].Message.Content
+	traceTools.SetSpanOutput(span, answer)
+	traceTools.SetSpanModel(span, Model)
+	traceTools.SetSpanSuccessCode(span)
+
+	return answer, nil
 }
 
 /*
@@ -250,12 +316,19 @@ Agent tools
 */
 
 // Tool for sales lookup
-func LookupSalesData(prompt string) string {
-	tableName := "sales"
+func LookUpSalesData(prompt string) string {
+	// Start span as sub span of the handleToolCalls span and update the latest tool context global variable
+	ctx, span := traceTools.StartOpenInferenceSpan("LookUpTool", traceTools.ToolKind, traceTools.HandleToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
+	traceTools.LastToolContext = ctx
 
-	// Open or Creae DB
+	traceTools.SetSpanInput(span, prompt)
+
+	// Open or Create DB
 	db, err := sql.Open("duckdb", "data.db")
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		traceTools.SetSpanErrorCode(span)
 		return fmt.Sprintf("Failed to open Database: %s\n", err)
 	}
 	defer db.Close()
@@ -266,11 +339,13 @@ func LookupSalesData(prompt string) string {
 			CREATE TABLE IF NOT EXISTS %s AS
 			SELECT * FROM read_parquet('%s')`,
 			tableName,
-			DATA_PATH,
+			DataPath,
 		),
 	)
 
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		traceTools.SetSpanErrorCode(span)
 		return fmt.Sprintf("Failed to execute table creation SQL: %s\n", err)
 	}
 
@@ -280,71 +355,114 @@ func LookupSalesData(prompt string) string {
 	)
 
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		traceTools.SetSpanErrorCode(span)
 		return fmt.Sprintf("Failed to fetch database columns: %s\n", err)
 	}
 
 	columns, err := result.Columns()
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		traceTools.SetSpanErrorCode(span)
 		return fmt.Sprintf("Failed to fetch database columns: %s\n", err)
 	}
 
 	sqlQuery, err := generateSqlQuery(prompt, columns, tableName)
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		traceTools.SetSpanErrorCode(span)
 		return fmt.Sprintf("Failed to generate SQL query: %s\n", err)
 	}
 
-	sqlQuery = strings.Trim(sqlQuery, "\n ")
-	sqlQuery = strings.ReplaceAll(sqlQuery, "```sql", "")
-	sqlQuery = strings.Trim(sqlQuery, "`")
-
+	sqlQuery = cleanLlmBlockResponse(sqlQuery)
 	log.Printf("Query to be used: %s\n", sqlQuery)
 
 	rows, err := db.Query(sqlQuery)
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		traceTools.SetSpanErrorCode(span)
 		return fmt.Sprintf("Failed to select data from database: %s\n", err)
+	}
+
+	columns, err = rows.Columns()
+	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		traceTools.SetSpanErrorCode(span)
+		return fmt.Sprintf("Failed to fetch query result columns: %s\n", err)
 	}
 
 	resultData := []string{strings.Join(columns, ", ")}
 	extractedRows, err := extractFromRows(rows, len(columns))
 	if err != nil {
+		log.Printf("WARNING: %s\n", err)
+		traceTools.SetSpanErrorCode(span)
 		return fmt.Sprintf("Failed to extract data from columns: %s\n", err)
 	}
 
 	resultData = append(resultData, extractedRows...)
-	return strings.Join(resultData, "\n")
+	returnValue := strings.Join(resultData, "\n")
+
+	traceTools.SetSpanOutput(span, returnValue)
+	traceTools.SetSpanSuccessCode(span)
+
+	return returnValue
 }
 
 // Tool for data analysis
 func AnalyzeSalesData(prompt string, data string) string {
-	var finalAnalysis string
-	formatedPrompt := fmt.Sprintf(DATA_ANALYSIS_PROMPT, data, prompt)
+	formatedPrompt := fmt.Sprintf(dataAnalysisPrompt, data, prompt)
+
+	// Start span as sub span of the handleToolCalls span and update the latest tool context global variable
+	ctx, span := traceTools.StartOpenInferenceSpan("AnalyzeTool", traceTools.ToolKind, traceTools.HandleToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
+	traceTools.LastToolContext = ctx
+
+	traceTools.SetSpanInput(span, formatedPrompt)
+
 	response, err := GetOpenaiClient().Chat.Completions.New(
-		context.TODO(),
+		ctx,
 		openai.ChatCompletionNewParams{
-			Model: openai.F(MODEL),
+			Model: openai.F(Model),
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
 				openai.UserMessage(formatedPrompt),
 			}),
 		},
 	)
 
+	var finalAnalysis string
 	if err != nil {
-		log.Printf("There was an issue with the OpenAI interaction: %s\n", err)
+		log.Printf("WARNING: There was an issue with the OpenAI interaction: %s\n", err)
 		finalAnalysis = ""
 	} else {
 		finalAnalysis = strings.Trim(response.Choices[0].Message.Content, "\n ")
 	}
 
+	traceTools.SetSpanModel(span, Model)
 	if finalAnalysis == "" {
+		traceTools.SetSpanErrorCode(span)
 		return "No analysis could be generated"
 	}
 
+	traceTools.SetSpanOutput(span, finalAnalysis)
+	traceTools.SetSpanSuccessCode(span)
 	return finalAnalysis
 }
 
 // Tool for data visualization
 func GenerateVisualization(data string, visualizationGoal string) string {
+	// Start span as sub span of the handleToolCalls span and update the latest tool context global variable
+	ctx, span := traceTools.StartOpenInferenceSpan("VisualizationTool", traceTools.ToolKind, traceTools.HandleToolContext)
+	defer traceTools.EndOpenInferenceSpan(span)
+	traceTools.LastToolContext = ctx
+
+	traceTools.SetSpanInput(span, []string{data, visualizationGoal})
+
 	config := extractChartConfig(data, visualizationGoal)
 	code := createChart(config)
+
+	traceTools.SetSpanOutput(span, code)
+	traceTools.SetSpanModel(span, Model)
+	traceTools.SetSpanSuccessCode(span)
+
 	return code
 }

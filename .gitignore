@@ -31,3 +31,6 @@ openaiChat/*.json
 
 # Python
 .venv
+
+# Compiled binaries
+*.o

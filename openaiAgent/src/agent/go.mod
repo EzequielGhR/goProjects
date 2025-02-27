@@ -1,11 +1,12 @@
-module tools
+module agent
 
 go 1.24.0
 
+replace tools => ../tools
+
 require (
-	github.com/invopop/jsonschema v0.13.0
-	github.com/marcboeker/go-duckdb v1.8.4
 	github.com/openai/openai-go v0.1.0-alpha.59
+	tools v0.0.0-00010101000000-000000000000
 	traceTools v0.0.0-00010101000000-000000000000
 )
 
@@ -21,9 +22,11 @@ require (
 	github.com/google/flatbuffers v25.1.24+incompatible // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.25.1 // indirect
+	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/marcboeker/go-duckdb v1.8.4 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
