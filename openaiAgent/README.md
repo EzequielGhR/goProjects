@@ -20,23 +20,30 @@ The whole project structure is divided into 4 modules
 The whole chain of calls and spans function as follows:
 ```
     Agent
+    ├── ChatCompletion
     ├── RouterCalls
+    |       ├── ChatCompletion
     │       ├── HandleToolCalls
     │       │   ├── ToolCall
     |       |   |   ├── StepCall
+    |       |   |   |   ├── Chat Completion
+    |       |   |   |   └── Chat Completion
     |       |   |   └── StepCall
+    |       |   |       └── ChatCompletion
     │       │   ├── ToolCall
     |       |   |   └── StepCall
     │       │   └── ToolCall
     │       └── HandleToolCalls
     │           ├── ToolCall
+    |           |   └── ChatCompletion
     │           ├── ToolCall
     │           └── ToolCall
     |               └── StepCall
+    ├── ChatCompletion
     └── RouterCalls
         └── ...
 ```
-The context of each span is tracked via global variables and carried over to each child
+The context of each span is tracked via global variables and carried over to each child if any
 
 # Important notes:
 

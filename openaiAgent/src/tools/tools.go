@@ -184,12 +184,13 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 
 	formattedPrompt := fmt.Sprintf(chartConfigPrompt, data, visualizationGoal)
 
-	// Initialize span as subspan of the latest tool span. This is the lowest level chain so only track context locally
+	// Initialize span as subspan of the latest tool span. Only track context locally
 	ctx, span := traceTools.StartOpenInferenceSpan("ExtractChart", traceTools.ChainKind, traceTools.LastToolContext)
 	defer traceTools.EndOpenInferenceSpan(span)
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
+	// Start OpenAI manual tracing
 	llmCtx, llmSpan := traceTools.StartOpenAISpan(ctx, Model)
 	defer llmSpan.End()
 
@@ -209,6 +210,7 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 		},
 	)
 
+	// Add input attributes to llm span
 	traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
 		"llm.input_messages":  []string{inputMessage.String()},
 		"llm.response_format": responseFormat.String(),
@@ -235,6 +237,7 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 	responseMessage := response.Choices[0].Message
 	jsonData := cleanLlmBlockResponse(responseMessage.Content)
 
+	// Set llm span output attributes
 	traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
 		"llm.token_count.prompt":     int(response.Usage.PromptTokens),
 		"llm.token_count.completion": int(response.Usage.CompletionTokens),
@@ -265,12 +268,13 @@ func extractChartConfig(data string, visualizationGoal string) visualizationConf
 // Second part of the visualization tool. Generate code from chart
 func createChart(config visualizationConfigData) string {
 	formattedPrompt := fmt.Sprintf(createChartPrompt, config)
-	// Initialize span as subspan of the latest tool span. This is the lowest level chain so only track context locally
+	// Initialize span as subspan of the latest tool span. Only track context locally
 	ctx, span := traceTools.StartOpenInferenceSpan("CreateChart", traceTools.ChainKind, traceTools.LastToolContext)
 	defer traceTools.EndOpenInferenceSpan(span)
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
+	// Start OpenAI manual tracing
 	llmCtx, llmSpan := traceTools.StartOpenAISpan(ctx, Model)
 	defer llmSpan.End()
 
@@ -278,6 +282,7 @@ func createChart(config visualizationConfigData) string {
 		openai.UserMessage(formattedPrompt),
 	})
 
+	// Add input attributes to llm span
 	traceTools.SetSpanAttr(llmSpan, "llm.input_messages", []string{inputMessage.String()})
 
 	response, err := GetOpenaiClient().Chat.Completions.New(
@@ -296,6 +301,8 @@ func createChart(config visualizationConfigData) string {
 	}
 
 	responseMessage := response.Choices[0].Message
+
+	// Add output attributes to llm span
 	traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
 		"llm.token_count.prompt":     int(response.Usage.PromptTokens),
 		"llm.token_count.completion": int(response.Usage.CompletionTokens),
@@ -320,12 +327,13 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 		strings.Join(columns, ", "), tableName,
 	)
 
-	// Initialize span as subspan of the latest tool span. This is the lowest level chain so only track context locally
+	// Initialize span as subspan of the latest tool span. Only track context locally
 	ctx, span := traceTools.StartOpenInferenceSpan("SqlGeneration", traceTools.ChainKind, traceTools.LastToolContext)
 	defer traceTools.EndOpenInferenceSpan(span)
 
 	traceTools.SetSpanInput(span, formattedPrompt)
 
+	// Manually trace OpenAI calls
 	llmCtx, llmSpan := traceTools.StartOpenAISpan(ctx, Model)
 	defer llmSpan.End()
 
@@ -333,6 +341,7 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 		openai.UserMessage(formattedPrompt),
 	})
 
+	// Add input attributes to llm span
 	traceTools.SetSpanAttr(llmSpan, "llm.input_messages", []string{inputMessage.String()})
 
 	response, err := GetOpenaiClient().Chat.Completions.New(
@@ -352,6 +361,7 @@ func generateSqlQuery(prompt string, columns []string, tableName string) (string
 
 	answer := response.Choices[0].Message
 
+	// Add output attributes to llm span
 	traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
 		"llm.token_count.prompt":     int(response.Usage.PromptTokens),
 		"llm.token_count.completion": int(response.Usage.CompletionTokens),
@@ -479,9 +489,11 @@ func AnalyzeSalesData(prompt string, data string) string {
 		openai.UserMessage(formatedPrompt),
 	})
 
+	// Start OpenAI manual tracing
 	llmCtx, llmSpan := traceTools.StartOpenAISpan(ctx, Model)
 	defer llmSpan.End()
 
+	// Add input attributes to llm span
 	traceTools.SetSpanAttr(llmSpan, "llm.input_messages", []string{inputMessage.String()})
 
 	response, err := GetOpenaiClient().Chat.Completions.New(
@@ -494,13 +506,12 @@ func AnalyzeSalesData(prompt string, data string) string {
 
 	finalAnalysis := ""
 	responseMessages := []string{}
-	promptTokens := 0
-	completionTokens := 0
-	totalTokens := 0
+	promptTokens, completionTokens, totalTokens := 0, 0, 0
 	if err == nil {
 		responseMessage := response.Choices[0].Message
 		finalAnalysis = strings.Trim(responseMessage.Content, "\n ")
 		responseMessages = []string{openai.F(responseMessages).String()}
+
 		promptTokens = int(response.Usage.PromptTokens)
 		completionTokens = int(response.Usage.CompletionTokens)
 		totalTokens = int(response.Usage.TotalTokens)
@@ -508,6 +519,7 @@ func AnalyzeSalesData(prompt string, data string) string {
 		log.Printf("WARNING: There was an issue with the OpenAI interaction: %s\n", err)
 	}
 
+	// Set output attributes to llm span
 	traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
 		"llm.token_count.prompt":     promptTokens,
 		"llm.token_count.completion": completionTokens,

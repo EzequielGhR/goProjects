@@ -263,9 +263,11 @@ func RunAgent[T AgentInput](messages T) (string, error) {
 		inputMessage := inputMessages[0]
 		traceTools.SetSpanInput(span, inputMessage)
 
+		// Start OpenAI manual tracing
 		llmCtx, llmSpan := traceTools.StartOpenAISpan(ctx, tools.Model)
 		defer llmSpan.End()
 
+		// Add input attributes to llm span
 		traceTools.SetSpanAttr(llmSpan, "llm.input_messages", inputMessages)
 
 		response, err := tools.GetOpenaiClient().Chat.Completions.New(
@@ -294,6 +296,7 @@ func RunAgent[T AgentInput](messages T) (string, error) {
 			rawJsonToolCalls = append(rawJsonToolCalls, toolCall.JSON.RawJSON())
 		}
 
+		// Add output attributes to llm span
 		traceTools.SetSpanAttrFromMap(llmSpan, map[string]any{
 			"llm.token_count.prompt":     int(response.Usage.PromptTokens),
 			"llm.token_count.completion": int(response.Usage.CompletionTokens),
