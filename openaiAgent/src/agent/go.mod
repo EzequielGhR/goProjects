@@ -6,7 +6,6 @@ replace tools => ../tools
 
 require (
 	github.com/openai/openai-go v0.1.0-alpha.59
-	go.opentelemetry.io/otel v1.34.0
 	tools v0.0.0-00010101000000-000000000000
 	traceTools v0.0.0-00010101000000-000000000000
 )
@@ -36,6 +35,7 @@ require (
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
+	go.opentelemetry.io/otel v1.34.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.34.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.34.0 // indirect
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
