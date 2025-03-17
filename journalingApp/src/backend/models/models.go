@@ -2,6 +2,7 @@ package models
 
 import (
 	"bufio"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -127,12 +128,12 @@ func LoadPages(forceReload bool) []*Page {
 }
 
 // <<< Request and Response structs >>>
+
 // Requests
 type PageRequest struct {
 	*Page
 
-	ProtectedID string
-	Contents string
+	Content string `json:"content"`
 }
 
 func (pageReq *PageRequest) Bind(req *http.Request) error {
@@ -140,8 +141,6 @@ func (pageReq *PageRequest) Bind(req *http.Request) error {
 		return errors.New("missing required page fields")
 	}
 
-	// TODO: Something with this protected id.
-	pageReq.ProtectedID = ""
 	pageReq.Page.Title = strings.ToLower(pageReq.Page.Title)
 	return nil
 }
@@ -194,7 +193,8 @@ func NewPageWithContentResponse(page *Page, content string) *PageWithContentResp
 // <<< internal functions >>>
 
 func InternalCreateNewPage(page *Page, content string) (string, error) {
-	page.ID = uuid.New().String()
+	
+	page.ID = hex.EncodeToString([]byte(uuid.NewString()))
 	if err:= createFSPage(page, content); err != nil {
 		return "", err
 	}

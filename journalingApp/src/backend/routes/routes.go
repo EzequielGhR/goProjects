@@ -51,7 +51,7 @@ func CreatePage(wr http.ResponseWriter, req *http.Request) {
 	}
 
 	page := data.Page
-	_, err := models.InternalCreateNewPage(page, data.Contents)
+	_, err := models.InternalCreateNewPage(page, data.Content)
 	if err != nil {
 		render.Render(wr, req, models.ErrRender(err))
 		return
@@ -124,7 +124,7 @@ func UpdatePage(wr http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	_, err := models.InternalUpdatePage(page.ID, page, data.Contents)
+	_, err := models.InternalUpdatePage(page.ID, page, data.Content)
 	if err != nil {
 		render.Render(wr, req, models.ErrRender(err))
 		return
