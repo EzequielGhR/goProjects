@@ -12,6 +12,7 @@ import (
 
 // Main routes function to be used on main router
 func PageGlobalRoutes(pageRouter chi.Router) {
+	models.LoadPages(true)
 	pageRouter.Get("/", ListPages)
 	pageRouter.Post("/", CreatePage)
 	pageRouter.Route("/{pageID}", pageElementRoutes)
@@ -24,6 +25,7 @@ func pageElementRoutes(elementRouter chi.Router) {
 	elementRouter.Get("/", GetPage)
 	elementRouter.Put("/", UpdatePage)
 	elementRouter.Delete("/", DeletePage)
+	elementRouter.Get("/content", GetPageContents)
 }
 
 // <<< Endpoints >>>
@@ -49,7 +51,7 @@ func CreatePage(wr http.ResponseWriter, req *http.Request) {
 	}
 
 	page := data.Page
-	_, err := models.InternalCreateNewPage(page)
+	_, err := models.InternalCreateNewPage(page, data.Contents)
 	if err != nil {
 		render.Render(wr, req, models.ErrRender(err))
 		return
@@ -61,6 +63,7 @@ func CreatePage(wr http.ResponseWriter, req *http.Request) {
 
 // The page context middleware
 func PageCtx(next http.Handler) http.Handler {
+	models.LoadPages(false)
 	return http.HandlerFunc(
 		func(wr http.ResponseWriter, req *http.Request) {
 			// Get the pageID from the URL params
@@ -121,7 +124,7 @@ func UpdatePage(wr http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	_, err := models.InternalUpdatePage(page.ID, page)
+	_, err := models.InternalUpdatePage(page.ID, page, data.Contents)
 	if err != nil {
 		render.Render(wr, req, models.ErrRender(err))
 		return
@@ -150,4 +153,26 @@ func DeletePage(wr http.ResponseWriter, req *http.Request) {
 	}
 
 	render.Render(wr, req, models.NewPageResponse(page))
+}
+
+func GetPageContents(wr http.ResponseWriter, req *http.Request) {
+	// Get the page from the context, this is possible because of the PageCtx middleware
+	page, ok := req.Context().Value(models.CtxKey).(*models.Page)
+	if !ok {
+		render.Render(
+			wr,
+			req,
+			models.ErrRender(
+				errors.New("context does not hold a Page element"),
+			),
+		)
+	}
+
+	page, content,  err := models.InternalGetPageWithContents(page.ID)
+	if err != nil {
+		render.Render(wr, req, models.ErrInvalidRequest(err))
+		return
+	}
+
+	render.Render(wr, req, models.NewPageWithContentResponse(page, content))
 }

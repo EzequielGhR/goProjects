@@ -1,26 +1,31 @@
 package models
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"path"
-	"slices"
 	"strings"
 
 	"github.com/go-chi/render"
 	"github.com/google/uuid"
 )
 
-// TODO: Implement storage
-const StoragePath = "./storage"
+const StoragePath = "../../storage"
 
-// Context key for page context
+const MaxByteSize = 10000
+
+// <<< Context key for page context >>>
+
 type ContextKey string
 
 const CtxKey ContextKey = "page"
 
 // <<< Errors >>>
+
 type ErrResponse struct {
 	Err            error
 	HTTPStatusCode int
@@ -33,7 +38,7 @@ func (e *ErrResponse) Render(wr http.ResponseWriter, req *http.Request) error {
 	return nil
 }
 
-// 400
+// Error 400
 func ErrInvalidRequest(err error) render.Renderer {
 	return &ErrResponse{
 		Err:            err,
@@ -43,7 +48,7 @@ func ErrInvalidRequest(err error) render.Renderer {
 	}
 }
 
-// 422
+// Error 422
 func ErrRender(err error) render.Renderer {
 	return &ErrResponse{
 		Err:            err,
@@ -53,23 +58,72 @@ func ErrRender(err error) render.Renderer {
 	}
 }
 
-// 404
+// Error 404
 var ErrNotFound = &ErrResponse{
 	HTTPStatusCode: http.StatusNotFound,
 	StatusText:     "Resource not found",
 }
 
 // <<< Pages >>>
+
 type Page struct {
-	ID    string
-	Title string
-	Path  string
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Path  string `json:"path"`
 }
 
-// TODO: Non Static Pages
-var pages = []*Page{
-	{ID: "1", Title: "Main page", Path: path.Join(StoragePath, "1.txt")},
-	{ID: "2", Title: "Test Page", Path: path.Join(StoragePath, "2.txt")},
+var pages = []*Page{}
+
+func protectedLoadPages() {
+	log.Println("Loading Pages from storage")
+	pagesPath := path.Join(StoragePath, "pages")
+	if err := os.MkdirAll(pagesPath, os.ModePerm); err != nil {
+		log.Panic(err)
+	}
+
+	files, err := os.ReadDir(pagesPath)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	for _, file := range files {
+		log.Println("Here")
+		if file.IsDir() {
+			log.Println("INFO: Skipping directory")
+			continue
+		}
+
+		fileName := file.Name()
+		if !strings.HasSuffix(fileName, ".txt") {
+			log.Println("INFO: Skipping non txt file")
+			continue
+		}
+
+		fileParts := strings.Split(fileName, ".")
+		if len(fileParts) != 3 {
+			log.Printf("ERROR: Malformed file name '%s'\n", fileName)
+			continue
+		}
+
+		log.Printf("Found Page text file: %s\n", fileName)
+
+		page := new(Page)
+		page.Title = fileParts[0]
+		page.ID = fileParts[1]
+		page.Path = path.Join(pagesPath, fileName)
+		pages = append(pages, page)
+	}
+
+	log.Println("Loaded all available pages")
+}
+
+func LoadPages(forceReload bool) []*Page {
+	if len(pages) == 0 || forceReload {
+		protectedLoadPages()
+		return pages
+	}
+
+	return pages
 }
 
 // <<< Request and Response structs >>>
@@ -78,6 +132,7 @@ type PageRequest struct {
 	*Page
 
 	ProtectedID string
+	Contents string
 }
 
 func (pageReq *PageRequest) Bind(req *http.Request) error {
@@ -98,9 +153,20 @@ type PageResponse struct {
 	Elapsed int64
 }
 
+type PageWithContentResponse struct {
+	*Page
+
+	Content string
+}
+
 func (pageResp *PageResponse) Render(wr http.ResponseWriter, req *http.Request) error {
 	// TODO: Dynamic elapsed time
 	pageResp.Elapsed = 10
+	return nil
+}
+
+func (pageResp *PageWithContentResponse) Render(wr http.ResponseWriter, req *http.Request) error {
+	// TODO: Dynamic elapsed time
 	return nil
 }
 
@@ -117,19 +183,34 @@ func NewPageListResponse(pages []*Page) []render.Renderer {
 	return pageList
 }
 
+func NewPageWithContentResponse(page *Page, content string) *PageWithContentResponse{
+	resp := &PageWithContentResponse{
+		Page: page,
+		Content: content,
+	}
+	return resp
+}
+
 // <<< internal functions >>>
-func InternalCreateNewPage(page *Page) (string, error) {
+
+func InternalCreateNewPage(page *Page, content string) (string, error) {
 	page.ID = uuid.New().String()
-	pages = append(pages, page)
+	if err:= createFSPage(page, content); err != nil {
+		return "", err
+	}
+
+	LoadPages(true)
 	return page.ID, nil
 }
 
 func InternalGetAllPages() ([]*Page, error) {
-	return pages, nil
+	availablePages := LoadPages(false)
+	return availablePages, nil
 }
 
 func InternalGetPage(pageID string) (*Page, error) {
-	for _, page := range pages {
+	availablePages := LoadPages(false)
+	for _, page := range availablePages {
 		if page.ID == pageID {
 			return page, nil
 		}
@@ -141,10 +222,15 @@ func InternalGetPage(pageID string) (*Page, error) {
 	)
 }
 
-func InternalUpdatePage(pageID string, page *Page) (*Page, error) {
-	for i, p := range pages {
+func InternalUpdatePage(pageID string, page *Page, content string) (*Page, error) {
+	availablePages := LoadPages(false)
+	for _, p := range availablePages {
 		if p.ID == pageID {
-			pages[i] = page
+			if err:= createFSPage(page, content); err != nil {
+				return nil, err
+			}
+
+			LoadPages(true)
 			return page, nil
 		}
 	}
@@ -156,12 +242,125 @@ func InternalUpdatePage(pageID string, page *Page) (*Page, error) {
 }
 
 func InternalDeletePage(pageID string) (*Page, error) {
-	for i, p := range pages {
-		if p.ID == pageID {
-			pages = slices.Delete(pages, i, i)
-			return p, nil
+	availablePages := LoadPages(false)
+	for _, page := range availablePages {
+		if page.ID == pageID {
+			if err := deleteFSPage(page); err != nil {
+				return nil, err
+			}
+
+			LoadPages(true)
+			return page, nil
 		}
 	}
 
 	return nil, errors.New("page not found")
+}
+
+func InternalGetPageWithContents(pageID string) (*Page, string, error) {
+	availablePages := LoadPages(false)
+	for _, page := range availablePages {
+		if page.ID == pageID {
+			pageContent, err := readFSPage(page)
+			if err != nil {
+				return nil, "", err
+			}
+
+			return page, pageContent, nil
+		}
+	}
+
+	return nil, "", errors.New("Page Not Found")
+}
+
+// <<< FileSystem >>>
+
+func createFile(filePath string, content string) error {
+	log.Printf("INFO: Creating file at '%s'\n", filePath)
+
+	file, err := os.Create(filePath)
+	defer file.Close()
+
+	if err != nil {
+		log.Printf("ERROR: Failed to create file '%s'\n", filePath)
+		return err
+	}
+
+	log.Println("INFO: Writing contents to file")
+
+	_, err = file.Write([]byte(content))
+	if err != nil {
+		log.Println("ERROR: Failed to write contents to file")
+		return err
+	}
+
+	return nil
+}
+
+func deleteFile(filePath string) error {
+	log.Printf("INFO: Deleting file at '%s'\n", filePath)
+
+	if err := os.Remove(filePath); err != nil {
+		log.Printf("ERROR: Failed to delete file '%s'\n", filePath)
+		return err
+	}
+
+	return nil
+}
+
+func readFile(filePath string) (string, error) {
+	log.Printf("INFO: Reading file at '%s\n", filePath)
+
+	file, err := os.Open(filePath)
+	defer file.Close()
+
+	if err != nil {
+		log.Printf("There was an error openning file '%s'\n", filePath)
+		return "", err
+	}
+
+	buffer := make([]byte, MaxByteSize)
+
+	bytesRead, err := bufio.NewReader(file).Read(buffer)
+	if err != nil {
+		return string(buffer[:bytesRead]), err
+	}
+	
+	return string(buffer[:bytesRead]), nil
+}
+
+func createFSPage(page *Page, contents string) error {
+	fileId := getSafeId(page)
+	page.Path = path.Join(StoragePath, "pages", fileId)
+	if err := createFile(page.Path, contents); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func deleteFSPage(page *Page) error {
+	if err := deleteFile(page.Path); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func readFSPage(page *Page) (string, error) {
+	content, err := readFile(page.Path)
+
+	if err != nil {
+		return content, err
+	}
+
+	return content, nil
+}
+
+func getSafeId(page *Page) string {
+	// TODO: Improve this
+	fileId := strings.Join([]string{page.Title, page.ID, "txt"}, ".")
+	fileId = strings.ToLower(fileId)
+	fileId = strings.Replace(fileId, " ", "_", -1)
+	return fileId
 }
