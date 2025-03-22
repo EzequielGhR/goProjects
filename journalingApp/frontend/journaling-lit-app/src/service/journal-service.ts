@@ -8,6 +8,8 @@ class JournalError extends Error { }
 export class JournalService {
     constructor (private baseURL: string) { }
 
+    private pageList: PageResponse[] = [];
+
     public async getPage(id: string): Promise<PageResponse | undefined> {
         return this.fetchPage(id, false)
     }
@@ -16,8 +18,13 @@ export class JournalService {
         return this.fetchPage(id, true)
     }
 
-    public async getPageList(): Promise<PageResponse[] | undefined> {
-        return this.fetchPageList()
+    public async getPageList(): Promise<PageResponse[]> {
+        const result = await this.fetchPageList()
+        if (result) {
+            this.pageList = result;
+        }
+
+        return this.pageList
     }
 
     public async createPage(page: PageWithContent): Promise<void | object> {
