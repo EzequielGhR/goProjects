@@ -155,7 +155,7 @@ type PageResponse struct {
 type PageWithContentResponse struct {
 	*Page
 
-	Content string
+	Content string `json:"content"`
 }
 
 func (pageResp *PageResponse) Render(wr http.ResponseWriter, req *http.Request) error {

@@ -6,7 +6,24 @@ import {
 class JournalError extends Error { }
 
 export class JournalService {
-    constructor (private baseURL: string) { }
+    private static cache: Record<string, JournalService> = {};
+
+    private constructor (private baseURL: string) { console.log(JournalService.cache) }
+
+    public static new(baseURL: string, id?: string): JournalService {
+        const instanceId = id || "default";
+        if (!this.cache[instanceId]) {
+            console.log(`Starting new instance with Id "${instanceId}"`)
+            this.cache[instanceId] = new JournalService(baseURL);
+        }
+
+        return this.cache[instanceId];
+    }
+
+    public static newLocal(): JournalService {
+        // Create an instance pointing to localhost and with id default
+        return this.new("http://localhost:8080")
+    }
 
     private pageList: PageResponse[] = [];
 
