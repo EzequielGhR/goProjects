@@ -87,6 +87,7 @@ func protectedLoadPages() {
 		log.Panic(err)
 	}
 
+	localPages := []*Page{}
 	for _, file := range files {
 		log.Println("Here")
 		if file.IsDir() {
@@ -112,9 +113,10 @@ func protectedLoadPages() {
 		page.Title = fileParts[0]
 		page.ID = fileParts[1]
 		page.Path = path.Join(pagesPath, fileName)
-		pages = append(pages, page)
+		localPages = append(localPages, page)
 	}
 
+	pages = localPages
 	log.Println("Loaded all available pages")
 }
 
@@ -182,9 +184,9 @@ func NewPageListResponse(pages []*Page) []render.Renderer {
 	return pageList
 }
 
-func NewPageWithContentResponse(page *Page, content string) *PageWithContentResponse{
+func NewPageWithContentResponse(page *Page, content string) *PageWithContentResponse {
 	resp := &PageWithContentResponse{
-		Page: page,
+		Page:    page,
 		Content: content,
 	}
 	return resp
@@ -193,9 +195,9 @@ func NewPageWithContentResponse(page *Page, content string) *PageWithContentResp
 // <<< internal functions >>>
 
 func InternalCreateNewPage(page *Page, content string) (string, error) {
-	
+
 	page.ID = hex.EncodeToString([]byte(uuid.NewString()))
-	if err:= createFSPage(page, content); err != nil {
+	if err := createFSPage(page, content); err != nil {
 		return "", err
 	}
 
@@ -226,7 +228,7 @@ func InternalUpdatePage(pageID string, page *Page, content string) (*Page, error
 	availablePages := LoadPages(false)
 	for _, p := range availablePages {
 		if p.ID == pageID {
-			if err:= createFSPage(page, content); err != nil {
+			if err := createFSPage(page, content); err != nil {
 				return nil, err
 			}
 
@@ -279,12 +281,12 @@ func createFile(filePath string, content string) error {
 	log.Printf("INFO: Creating file at '%s'\n", filePath)
 
 	file, err := os.Create(filePath)
-	defer file.Close()
-
 	if err != nil {
 		log.Printf("ERROR: Failed to create file '%s'\n", filePath)
 		return err
 	}
+
+	defer file.Close()
 
 	log.Println("INFO: Writing contents to file")
 
@@ -312,12 +314,12 @@ func readFile(filePath string) (string, error) {
 	log.Printf("INFO: Reading file at '%s\n", filePath)
 
 	file, err := os.Open(filePath)
-	defer file.Close()
-
 	if err != nil {
 		log.Printf("There was an error openning file '%s'\n", filePath)
 		return "", err
 	}
+
+	defer file.Close()
 
 	buffer := make([]byte, MaxByteSize)
 
@@ -325,7 +327,7 @@ func readFile(filePath string) (string, error) {
 	if err != nil {
 		return string(buffer[:bytesRead]), err
 	}
-	
+
 	return string(buffer[:bytesRead]), nil
 }
 

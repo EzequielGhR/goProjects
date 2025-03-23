@@ -2,6 +2,8 @@ import { LitElement, html, css } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { PageResponse, PageWithContent } from "../abstract/JournalTypes"
 import { JournalService } from '../service/journal-service'
+import "./journ-new-page"
+import "./journ-delete-page"
 
 
 @customElement("journ-page-list")
@@ -79,6 +81,46 @@ export class JournPageList extends LitElement {
             font-style: italic;
             color: gray;
         }
+            .button-container {
+            margin-top: auto;
+            padding: 10px;
+            text-align: center;
+        }
+
+        button {
+            color: white;
+            border: none;
+            padding: 10px;
+            width: 100%;
+            cursor: pointer;
+            font-size: 1rem;
+            border-radius: 5px;
+            transition: background 0.2s;
+        }
+
+        button.save-button {
+            background: #28a745;
+        }
+
+        button.delete-button {
+            background: #dc3545;
+        }
+
+        button:hover {
+            opacity: 0.8;
+        }
+
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
     `;
 
 
@@ -93,10 +135,20 @@ export class JournPageList extends LitElement {
     @state()
     private isLoadingContent = false;
 
-    protected async willUpdate() {
+    @state()
+    private creatingNewPage = false;
+
+    @state()
+    private deletingPage = false;
+
+    private async loadPageList() {
+        console.log("Fetching page list...");
+        this.pageList = await this.service.getPageList();
+    }
+
+    protected willUpdate() {
         if (this.pageList === undefined) {
-            console.log("Fetching page list...");
-            this.pageList = await this.service.getPageList();
+            this.loadPageList();
         }
     }
 
@@ -111,6 +163,26 @@ export class JournPageList extends LitElement {
         this.isLoadingContent = false;
     }
 
+    private startNewPage() {
+        this.creatingNewPage = true;
+    }
+
+    private handleNewPageCreated() {
+        this.creatingNewPage = false;
+        this.loadPageList();
+    }
+
+    private deletePage() {
+        this.deletingPage = true;
+    }
+
+    private handlePageDeleted() {
+        this.deletingPage = false;
+        setTimeout(() => {
+            this.loadPageList();
+        }, 100);
+    }
+
     render() {
         if (!this.pageList) {
             return html`<p>Loading...</p>`; // Show a loading state if data isn't ready
@@ -121,12 +193,21 @@ export class JournPageList extends LitElement {
                 <div class="sidebar">
                     <h2>Pages</h2>
                     ${this.pageList.map(page => this.renderPageTitle(page))}
+                    <div class="button-container">
+                        <button class="save-button" @click="${this.startNewPage}">+ New Page</button>
+                    </div>
+                    <div class="button-container">
+                        <button class="delete-button" @click="${this.deletePage}">- Delete Page</button>
+                    </div>
                 </div>
                 <!-- Details View -->
                 <div class="content">
                     ${this.renderContent()}
                 </div>
             </div>
+            
+            ${this.renderNewPageOverlay()}
+            ${this.renderDeleteOverlay()}
         `
     }
 
@@ -154,6 +235,33 @@ export class JournPageList extends LitElement {
             <h2>${this.selectedPage.title}</h2>
             <p>ID: ${this.selectedPage.id}</p>
             <p>${this.selectedPage.content}</p>
+        `
+    }
+
+    renderNewPageOverlay() {
+        if (!this.creatingNewPage) {
+            return ""
+        }
+
+        return html`
+            <div class="overlay">
+                 <journ-new-page @jl-close="${this.handleNewPageCreated}"></journ-new-page>
+            </div>
+        `
+    }
+
+    renderDeleteOverlay() {
+        if (!this.deletingPage || !this.selectedPage) {
+            return ""
+        }
+
+        return html `
+            <div class="overlay">
+                <journ-delete-page
+                    .page="${this.selectedPage}"
+                    @jl-close="${this.handlePageDeleted}">
+                </journ-delete-page>
+            </div>
         `
     }
 }
