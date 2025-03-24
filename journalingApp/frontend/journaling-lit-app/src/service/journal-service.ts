@@ -8,8 +8,10 @@ class JournalError extends Error { }
 export class JournalService {
     private static cache: Record<string, JournalService> = {};
 
-    private constructor (private baseURL: string) { console.log(JournalService.cache) }
+    // Keep the constructor private so new classes can only be instantiated from following methods.
+    private constructor (private baseURL: string) { }
 
+    // Start a new instance and cache it
     public static new(baseURL: string, id?: string): JournalService {
         const instanceId = id || "default";
         if (!this.cache[instanceId]) {
@@ -20,9 +22,13 @@ export class JournalService {
         return this.cache[instanceId];
     }
 
+    // Create an instance pointing to localhost and with id default
     public static newLocal(): JournalService {
-        // Create an instance pointing to localhost and with id default
         return this.new("http://localhost:8080")
+    }
+
+    public static clearCache() {
+        this.cache = {};
     }
 
     private pageList: PageResponse[] = [];

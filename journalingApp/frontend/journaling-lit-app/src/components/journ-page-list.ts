@@ -139,6 +139,9 @@ export class JournPageList extends LitElement {
     private creatingNewPage = false;
 
     @state()
+    private editingPage = false;
+
+    @state()
     private deletingPage = false;
 
     private async loadPageList() {
@@ -163,17 +166,23 @@ export class JournPageList extends LitElement {
         this.isLoadingContent = false;
     }
 
-    private startNewPage() {
-        this.creatingNewPage = true;
+    private startEditingPage() {
+        this.editingPage = true;
     }
 
-    private handleNewPageCreated() {
+    private handlePageEdited() {
+        this.editingPage = false;
         this.creatingNewPage = false;
         this.loadPageList();
     }
 
     private deletePage() {
         this.deletingPage = true;
+    }
+
+    private createNewPage() {
+        this.creatingNewPage = true;
+        this.startEditingPage()
     }
 
     private handlePageDeleted() {
@@ -194,10 +203,13 @@ export class JournPageList extends LitElement {
                     <h2>Pages</h2>
                     ${this.pageList.map(page => this.renderPageTitle(page))}
                     <div class="button-container">
-                        <button class="save-button" @click="${this.startNewPage}">+ New Page</button>
+                        <button class="save-button" @click="${this.createNewPage}">+ New Page</button>
                     </div>
                     <div class="button-container">
                         <button class="delete-button" @click="${this.deletePage}">- Delete Page</button>
+                    </div>
+                    <div class="button-container">
+                        <button class="edit-button" @click="${this.startEditingPage}">Edit Page</button>
                     </div>
                 </div>
                 <!-- Details View -->
@@ -206,8 +218,8 @@ export class JournPageList extends LitElement {
                 </div>
             </div>
             
-            ${this.renderNewPageOverlay()}
             ${this.renderDeleteOverlay()}
+            ${this.renderEditOverlay()}
         `
     }
 
@@ -230,23 +242,10 @@ export class JournPageList extends LitElement {
             return html`<p>Select a page to view details</p>`
         }
 
-        console.log(this.selectedPage)
         return html`
             <h2>${this.selectedPage.title}</h2>
             <p>ID: ${this.selectedPage.id}</p>
             <p>${this.selectedPage.content}</p>
-        `
-    }
-
-    renderNewPageOverlay() {
-        if (!this.creatingNewPage) {
-            return ""
-        }
-
-        return html`
-            <div class="overlay">
-                 <journ-new-page @jl-close="${this.handleNewPageCreated}"></journ-new-page>
-            </div>
         `
     }
 
@@ -255,13 +254,32 @@ export class JournPageList extends LitElement {
             return ""
         }
 
-        return html `
+        return html`
             <div class="overlay">
                 <journ-delete-page
                     .page="${this.selectedPage}"
                     @jl-close="${this.handlePageDeleted}">
                 </journ-delete-page>
             </div>
+        `
+    }
+
+    renderEditOverlay() {
+        if (!this.editingPage) {
+            return ""
+        }
+
+        if (!this.creatingNewPage && !this.selectedPage) {
+            return ""
+        }
+
+        const page = this.creatingNewPage ? undefined : this.selectedPage;
+
+        return html`
+        <div class="overlay">
+            <journ-new-page .page=${page} @jl-close="${this.handlePageEdited}">
+            </journ-new-page>
+        </div>        
         `
     }
 }

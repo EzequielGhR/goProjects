@@ -89,7 +89,6 @@ func protectedLoadPages() {
 
 	localPages := []*Page{}
 	for _, file := range files {
-		log.Println("Here")
 		if file.IsDir() {
 			log.Println("INFO: Skipping directory")
 			continue

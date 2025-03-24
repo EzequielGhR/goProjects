@@ -1,11 +1,14 @@
 import { LitElement, html, css,  } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 import { JournalService } from '../service/journal-service';
 import { PageWithContent } from '../abstract/JournalTypes';
 
 
 @customElement("journ-new-page")
 export class JournNewPage extends LitElement {
+    @property({ type: Object })
+    private page?: PageWithContent;
+
     static styles = css`
         :host {
             position: fixed;
@@ -86,18 +89,18 @@ export class JournNewPage extends LitElement {
     protected service = JournalService.newLocal();
 
     @state()
-    private pageTitle = "";
-
-    @state()
-    private content = "";
+    private editedPage: PageWithContent = {id: "", path: "", title: "", content: ""};
 
     private async savePage() {
-        if (!this.pageTitle.trim()) {
+        if (!this.editedPage.title.trim()) {
             alert("Title is required");
         }
 
-        const page: PageWithContent = {id: "", path: "", title: this.pageTitle, content: this.content}
-        await this.service.createPage(page);
+        if (!this.page){
+            await this.service.createPage(this.editedPage);
+        } else {
+            await this.service.updatePage(this.page.id, this.editedPage)
+        }
 
         this.dispatchEvent(new CustomEvent("jl-close", { bubbles: true, composed: true }));
     }
@@ -107,11 +110,12 @@ export class JournNewPage extends LitElement {
     }
 
     render() {
+        this.editedPage = this.page ? this.page : {id: "", path: "", title: "", content: ""};
         return html`
             <div class="modal">
                 <h2>Create New Page</h2>
-                <input type="text" placeholder="Title" .value=${this.pageTitle} @input=${(e: any) => this.pageTitle = e.target.value} />
-                <textarea placeholder="Content" .value=${this.content} @input=${(e: any) => this.content = e.target.value}></textarea>
+                <input type="text" placeholder="Title" .value=${this.editedPage.title || ""} @input=${(e: any) => this.editedPage.title = e.target.value} />
+                <textarea placeholder="Content" .value=${this.editedPage.content} @input=${(e: any) => this.editedPage.content = e.target.value}></textarea>
                 <button class="save" @click=${this.savePage}>Save</button>
                 <button class="cancel" @click=${this.closeModal}>Cancel</button>
             </div>
