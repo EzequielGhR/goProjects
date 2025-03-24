@@ -187,9 +187,16 @@ export class JournPageList extends LitElement {
 
     private handlePageDeleted() {
         this.deletingPage = false;
+        // Use a timeout to assure the pages are loaded in time
         setTimeout(() => {
             this.loadPageList();
         }, 100);
+    }
+
+    private displayTitle(page: PageResponse | PageWithContent): string {
+        let titleParts = page.title.trim().split("_")
+        titleParts.forEach((w, idx, arr) => arr[idx] = [w[0].toUpperCase(), ...w.slice(1)].join(""))
+        return titleParts.join(" ")
     }
 
     render() {
@@ -225,10 +232,11 @@ export class JournPageList extends LitElement {
 
     renderPageTitle(page: PageResponse | PageWithContent) {
         const isSelected = this.selectedPage?.id === page.id;
+        const title = this.displayTitle(page)
 
         return html`
             <div class="page-item ${isSelected ? 'selected' : ''}" @click=${() => this.selectPage(page.id)}>
-                ${page.title}
+                ${title}
             </div>
         `
     }
@@ -243,7 +251,7 @@ export class JournPageList extends LitElement {
         }
 
         return html`
-            <h2>${this.selectedPage.title}</h2>
+            <h2>${this.displayTitle(this.selectedPage)}</h2>
             <p>ID: ${this.selectedPage.id}</p>
             <p>${this.selectedPage.content}</p>
         `

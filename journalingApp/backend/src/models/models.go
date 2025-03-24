@@ -73,8 +73,13 @@ type Page struct {
 	Path  string `json:"path"`
 }
 
+// Track the pages globally
 var pages = []*Page{}
 
+/*
+Load pages from local storage files. Files with format
+page_title.page_id.txt are loaded
+*/
 func protectedLoadPages() {
 	log.Println("Loading Pages from storage")
 	pagesPath := path.Join(StoragePath, "pages")
@@ -119,6 +124,12 @@ func protectedLoadPages() {
 	log.Println("Loaded all available pages")
 }
 
+/*
+Load pages array, being cached or force reloaded
+
+	forceReload: Force global var with pages to be reloaded
+	return: A slice of pages available
+*/
 func LoadPages(forceReload bool) []*Page {
 	if len(pages) == 0 || forceReload {
 		protectedLoadPages()
@@ -130,14 +141,14 @@ func LoadPages(forceReload bool) []*Page {
 
 // <<< Request and Response structs >>>
 
-// Requests
-type PageRequest struct {
+// Requests and response
+type PageWithContent struct {
 	*Page
 
 	Content string `json:"content"`
 }
 
-func (pageReq *PageRequest) Bind(req *http.Request) error {
+func (pageReq *PageWithContent) Bind(req *http.Request) error {
 	if pageReq.Page == nil {
 		return errors.New("missing required page fields")
 	}
@@ -146,17 +157,16 @@ func (pageReq *PageRequest) Bind(req *http.Request) error {
 	return nil
 }
 
-// Response
+func (pageResp *PageWithContent) Render(wr http.ResponseWriter, req *http.Request) error {
+	// TODO: Dynamic elapsed time
+	return nil
+}
+
+// Response without content
 type PageResponse struct {
 	*Page
 
 	Elapsed int64
-}
-
-type PageWithContentResponse struct {
-	*Page
-
-	Content string `json:"content"`
 }
 
 func (pageResp *PageResponse) Render(wr http.ResponseWriter, req *http.Request) error {
@@ -165,16 +175,21 @@ func (pageResp *PageResponse) Render(wr http.ResponseWriter, req *http.Request) 
 	return nil
 }
 
-func (pageResp *PageWithContentResponse) Render(wr http.ResponseWriter, req *http.Request) error {
-	// TODO: Dynamic elapsed time
-	return nil
-}
+/*
+Return a PageResponse struct reference to be rendered
 
+	page: The pointer to the Page object to be rendered
+*/
 func NewPageResponse(page *Page) *PageResponse {
 	resp := &PageResponse{Page: page}
 	return resp
 }
 
+/*
+Return an array of renderers for listing pages
+
+	pages: The slice of pointers to pages to be rendered
+*/
 func NewPageListResponse(pages []*Page) []render.Renderer {
 	pageList := []render.Renderer{}
 	for _, page := range pages {
@@ -183,8 +198,14 @@ func NewPageListResponse(pages []*Page) []render.Renderer {
 	return pageList
 }
 
-func NewPageWithContentResponse(page *Page, content string) *PageWithContentResponse {
-	resp := &PageWithContentResponse{
+/*
+Return a pointer to a page with content struct to be rendered.
+
+	page: The reference to a page to be rendered.
+	content: The content of the page
+*/
+func NewPageWithContentResponse(page *Page, content string) *PageWithContent {
+	resp := &PageWithContent{
 		Page:    page,
 		Content: content,
 	}
@@ -193,8 +214,14 @@ func NewPageWithContentResponse(page *Page, content string) *PageWithContentResp
 
 // <<< internal functions >>>
 
-func InternalCreateNewPage(page *Page, content string) (string, error) {
+/*
+Create a new page on storage
 
+	page: The reference to the page to be stored.
+	content: The content of the page to store.
+	return: The page ID or an empty string, with an error or nil on success
+*/
+func InternalCreateNewPage(page *Page, content string) (string, error) {
 	page.ID = hex.EncodeToString([]byte(uuid.NewString()))
 	if err := createFSPage(page, content); err != nil {
 		return "", err
@@ -204,11 +231,12 @@ func InternalCreateNewPage(page *Page, content string) (string, error) {
 	return page.ID, nil
 }
 
-func InternalGetAllPages() ([]*Page, error) {
-	availablePages := LoadPages(false)
-	return availablePages, nil
-}
+/*
+Fetch a page from storage.
 
+	pageID: The id of the page to fetch.
+	return: A reference to the page fetched, plus an error which is nil on success.
+*/
 func InternalGetPage(pageID string) (*Page, error) {
 	availablePages := LoadPages(false)
 	for _, page := range availablePages {
@@ -223,6 +251,14 @@ func InternalGetPage(pageID string) (*Page, error) {
 	)
 }
 
+/*
+Update a page stored by ID.
+
+	pageID: The id of the page to update.
+	page: The reference to the page to be created.
+	content: The new content for the updated file
+	return: A reference to the updated page and an error which is nil on success.
+*/
 func InternalUpdatePage(pageID string, page *Page, content string) (*Page, error) {
 	availablePages := LoadPages(false)
 	for _, p := range availablePages {
@@ -242,6 +278,12 @@ func InternalUpdatePage(pageID string, page *Page, content string) (*Page, error
 	)
 }
 
+/*
+Delete a page from storage
+
+	pageID: The id of the page to delete.
+	return: A reference to the deleted page, plus an error which is nil on success.
+*/
 func InternalDeletePage(pageID string) (*Page, error) {
 	availablePages := LoadPages(false)
 	for _, page := range availablePages {
@@ -258,6 +300,12 @@ func InternalDeletePage(pageID string) (*Page, error) {
 	return nil, errors.New("page not found")
 }
 
+/*
+Get a page and its contents from storage.
+
+	pageID: The id of the page to fetch.
+	return: A reference to the page, its content and an error which is nil on success.
+*/
 func InternalGetPageWithContents(pageID string) (*Page, string, error) {
 	availablePages := LoadPages(false)
 	for _, page := range availablePages {
@@ -276,6 +324,13 @@ func InternalGetPageWithContents(pageID string) (*Page, string, error) {
 
 // <<< FileSystem >>>
 
+/*
+Create a file on the system
+
+	filePath:
+	content:
+	return: An error, nil on success
+*/
 func createFile(filePath string, content string) error {
 	log.Printf("INFO: Creating file at '%s'\n", filePath)
 
@@ -298,6 +353,12 @@ func createFile(filePath string, content string) error {
 	return nil
 }
 
+/*
+Delete a file on the system
+
+	filePath:
+	return: An error, nil on success.
+*/
 func deleteFile(filePath string) error {
 	log.Printf("INFO: Deleting file at '%s'\n", filePath)
 
@@ -309,6 +370,12 @@ func deleteFile(filePath string) error {
 	return nil
 }
 
+/*
+Read a file from the system
+
+	filePath:
+	return: The file contents and an error, which is nil on success
+*/
 func readFile(filePath string) (string, error) {
 	log.Printf("INFO: Reading file at '%s\n", filePath)
 
@@ -330,6 +397,13 @@ func readFile(filePath string) (string, error) {
 	return string(buffer[:bytesRead]), nil
 }
 
+/*
+Create a page with the correct format, on the file system.
+
+	page: A reference to te page to save.
+	contents: The contents of the page.
+	return: An error which is nil on success.
+*/
 func createFSPage(page *Page, contents string) error {
 	fileId := getSafeId(page)
 	page.Path = path.Join(StoragePath, "pages", fileId)
@@ -340,6 +414,12 @@ func createFSPage(page *Page, contents string) error {
 	return nil
 }
 
+/*
+Delete a page from the file system
+
+	page: A reference to the page to be deleted
+	return: An error, nil on success.
+*/
 func deleteFSPage(page *Page) error {
 	if err := deleteFile(page.Path); err != nil {
 		return err
@@ -348,6 +428,12 @@ func deleteFSPage(page *Page) error {
 	return nil
 }
 
+/*
+Read a page contents from the file system.
+
+	page: A reference to the page to read.
+	return: The contents of the page and an error, which is nil on success.
+*/
 func readFSPage(page *Page) (string, error) {
 	content, err := readFile(page.Path)
 
@@ -358,6 +444,12 @@ func readFSPage(page *Page) (string, error) {
 	return content, nil
 }
 
+/*
+Sanitize the file id of a page based on its title and page ID.
+
+	page: A reference to the page to sanitize the file id of.
+	return: The sanitized id
+*/
 func getSafeId(page *Page) string {
 	// TODO: Improve this
 	fileId := strings.Join([]string{page.Title, page.ID, "txt"}, ".")

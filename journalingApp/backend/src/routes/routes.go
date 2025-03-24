@@ -30,21 +30,19 @@ func pageElementRoutes(elementRouter chi.Router) {
 
 // <<< Endpoints >>>
 
+// GET
 func ListPages(wr http.ResponseWriter, req *http.Request) {
-	pages, err := models.InternalGetAllPages()
-	if err != nil {
-		render.Render(wr, req, models.ErrRender(err))
-		return
-	}
+	pages := models.LoadPages(false)
 
-	if err = render.RenderList(wr, req, models.NewPageListResponse(pages)); err != nil {
+	if err := render.RenderList(wr, req, models.NewPageListResponse(pages)); err != nil {
 		render.Render(wr, req, models.ErrRender(err))
 		return
 	}
 }
 
+// POST
 func CreatePage(wr http.ResponseWriter, req *http.Request) {
-	data := new(models.PageRequest)
+	data := new(models.PageWithContent)
 	if err := render.Bind(req, data); err != nil {
 		render.Render(wr, req, models.ErrInvalidRequest(err))
 		return
@@ -86,6 +84,7 @@ func PageCtx(next http.Handler) http.Handler {
 	)
 }
 
+// GET
 func GetPage(wr http.ResponseWriter, req *http.Request) {
 	// Get the page from the context, this is possible because of the PageCtx middleware
 	page, ok := req.Context().Value(models.CtxKey).(*models.Page)
@@ -105,6 +104,7 @@ func GetPage(wr http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// PUT
 func UpdatePage(wr http.ResponseWriter, req *http.Request) {
 	// Get the page from the context, this is possible because of the PageCtx middleware
 	page, ok := req.Context().Value(models.CtxKey).(*models.Page)
@@ -118,7 +118,7 @@ func UpdatePage(wr http.ResponseWriter, req *http.Request) {
 		)
 	}
 
-	data := &models.PageRequest{Page: page}
+	data := &models.PageWithContent{Page: page}
 	if err := render.Bind(req, data); err != nil {
 		render.Render(wr, req, models.ErrInvalidRequest(err))
 		return
@@ -133,6 +133,7 @@ func UpdatePage(wr http.ResponseWriter, req *http.Request) {
 	render.Render(wr, req, models.NewPageResponse(page))
 }
 
+// DELETE
 func DeletePage(wr http.ResponseWriter, req *http.Request) {
 	// Get the page from the context, this is possible because of the PageCtx middleware
 	page, ok := req.Context().Value(models.CtxKey).(*models.Page)
@@ -155,6 +156,7 @@ func DeletePage(wr http.ResponseWriter, req *http.Request) {
 	render.Render(wr, req, models.NewPageResponse(page))
 }
 
+// GET
 func GetPageContents(wr http.ResponseWriter, req *http.Request) {
 	// Get the page from the context, this is possible because of the PageCtx middleware
 	page, ok := req.Context().Value(models.CtxKey).(*models.Page)
@@ -168,7 +170,7 @@ func GetPageContents(wr http.ResponseWriter, req *http.Request) {
 		)
 	}
 
-	page, content,  err := models.InternalGetPageWithContents(page.ID)
+	page, content, err := models.InternalGetPageWithContents(page.ID)
 	if err != nil {
 		render.Render(wr, req, models.ErrInvalidRequest(err))
 		return

@@ -45,7 +45,6 @@ export class JournalService {
         const result = await this.fetchPageList()
         if (result) {
             this.pageList = result;
-            console.log(this.pageList)
         }
 
         return this.pageList
